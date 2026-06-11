@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 )
 
@@ -15,13 +18,13 @@ type SearchAttributes struct {
 	Query  string
 
 	// Search selectors
-	ResultSelector     string
-	ResultNameSelector string
-	ResultLinkSelector string
+	ResultSelector     string // css
+	ResultNameSelector string // html
+	ResultLinkSelector string // html
 
 	// Episode selectors
-	EpisodeSelector     string
-	EpisodeNameSelector string
+	EpisodeSelector     string // css
+	EpisodeNameSelector string // html
 	EpisodeLinkSelector string
 }
 
@@ -32,20 +35,17 @@ type SearchResult struct {
 }
 
 type EpisodeResult struct {
-	Name   string
-	Number int
-	Link   string
+	Name          string
+	Number        int
+	ClickSelector string
 }
 
-func (s SearchAttributes) SearchForQuery(results *[]SearchResult) error {
+func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchResult) error {
 	if results == nil {
 		return fmt.Errorf("results pointer cannot be nil")
 	}
 
 	url := s.Site + s.Search + s.Query
-
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
 
 	var nodes []*cdp.Node
 	if err := chromedp.Run(
@@ -72,11 +72,12 @@ func (s SearchAttributes) SearchForQuery(results *[]SearchResult) error {
 	return nil
 }
 
-func (s SearchAttributes) GetEpisodes(episodes *[]EpisodeResult, result SearchResult) error {
-	url := result.Link
+func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeResult, result SearchResult) error {
+	if episodes == nil {
+		return fmt.Errorf("episodes pointer cannot be nil")
+	}
 
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
+	url := result.Link
 
 	var nodes []*cdp.Node
 	if err := chromedp.Run(
@@ -91,10 +92,12 @@ func (s SearchAttributes) GetEpisodes(episodes *[]EpisodeResult, result SearchRe
 	fmt.Printf("Found %d episodes:\n", len(nodes))
 	for i, node := range nodes {
 
+		selector := fmt.Sprintf("%s:nth-child(%d)", s.EpisodeSelector, i+1)
+
 		item := EpisodeResult{
-			Name:   node.AttributeValue(s.EpisodeNameSelector),
-			Number: i + 1,
-			Link:   s.Site + node.AttributeValue(s.EpisodeLinkSelector),
+			Name:          node.AttributeValue(s.EpisodeNameSelector),
+			Number:        i + 1,
+			ClickSelector: selector,
 		}
 
 		*episodes = append(*episodes, item)
@@ -102,6 +105,38 @@ func (s SearchAttributes) GetEpisodes(episodes *[]EpisodeResult, result SearchRe
 	return nil
 }
 
+func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, result SearchResult) string {
+	url := result.Link
+	var streamURL string
+
+	// Subscribe to network events
+	chromedp.ListenTarget(ctx, func(ev any) {
+		switch e := ev.(type) {
+		// Check if the event type contains ".m3u8" or ".mp4"
+		case *network.EventRequestWillBeSent:
+			if strings.Contains(e.Request.URL, ".m3u8") || strings.Contains(e.Request.URL, ".mp4") {
+				streamURL = e.Request.URL
+			}
+		}
+	})
+
+	if err := chromedp.Run(
+		ctx,
+		network.Enable(),
+		chromedp.Navigate(url),
+		chromedp.WaitReady(s.EpisodeSelector),
+		chromedp.Click(episode.ClickSelector, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second),
+	); err != nil {
+		log.Fatal(err)
+	}
+	return streamURL
+}
+
 func (r SearchResult) Print() {
 	fmt.Printf("[%d] %s\n", r.Number, r.Name)
+}
+
+func (e EpisodeResult) Print() {
+	fmt.Printf("[%d] %s\n", e.Number, e.Name)
 }

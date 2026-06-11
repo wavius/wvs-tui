@@ -1,30 +1,38 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
+
+	"github.com/chromedp/chromedp"
 
 	"main/scraper"
 )
 
+var miruro scraper.SearchAttributes = scraper.SearchAttributes{
+	Site:   "https://www.miruro.to",
+	Search: "/search?query=",
+	Query:  "Naruto",
+
+	// Result attributes
+	ResultSelector:     "._styledCardWrapper_eylnt_1",
+	ResultNameSelector: "title",
+	ResultLinkSelector: "href",
+
+	// Episode attributes
+	EpisodeSelector:     "._root_p7i3w_1",
+	EpisodeNameSelector: "title",
+	EpisodeLinkSelector: "href",
+}
+
 func main() {
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
 	var results []scraper.SearchResult
 
-	attributes := scraper.SearchAttributes{
-		Site:   "https://www.miruro.to",
-		Search: "/search?query=",
-		Query:  "Naruto",
-
-		ResultSelector:     "._styledCardWrapper_eylnt_1",
-		ResultNameSelector: "title",
-		ResultLinkSelector: "href",
-
-		// You'll need to figure out what these actual selectors are!
-		EpisodeSelector:     ".episode-btn-class",
-		EpisodeNameSelector: "title",
-		EpisodeLinkSelector: "href",
-	}
-
-	err := attributes.SearchForQuery(&results)
+	err := miruro.SearchForQuery(ctx, &results)
 	if err != nil {
 		log.Fatal("Search failed:", err)
 	}
@@ -33,15 +41,19 @@ func main() {
 		result.Print()
 	}
 
-	// Example of how you would call GetEpisodes for the FIRST result:
-	/*
-		if len(results) > 0 {
-			var episodes []scraper.EpisodeResult
-			err = attributes.GetEpisodes(&episodes, results[0])
-			if err != nil {
-				log.Fatal("Episode fetch failed:", err)
-			}
-			// print episodes here...
-		}
-	*/
+	var episodes []scraper.EpisodeResult
+	err = miruro.GetEpisodes(ctx, &episodes, results[0])
+	if err != nil {
+		log.Fatal("Episode fetch failed:", err)
+	}
+
+	for i := 0; i < 3 && i < len(episodes); i++ {
+		episodes[i].Print()
+	}
+
+	if len(episodes) > 0 {
+		fmt.Println("\nSniffing network for video stream...")
+		videoURL := miruro.GetVideo(ctx, episodes[0], results[0])
+		fmt.Printf("GOT IT: %s\n", videoURL)
+	}
 }
