@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -18,14 +20,15 @@ type SearchAttributes struct {
 	Query  string
 
 	// Search selectors
-	ResultSelector     string // css
-	ResultNameSelector string // html
-	ResultLinkSelector string // html
+	ResultReadySelector string // css
+	ResultSelector      string // css
+	ResultNameSelector  string // html
+	ResultLinkSelector  string // html
 
 	// Episode selectors
-	EpisodeSelector     string // css
-	EpisodeNameSelector string // html
-	EpisodeLinkSelector string
+	EpisodeReadySelector string // css
+	EpisodeSelector      string // css
+	EpisodeNameSelector  string // html
 }
 
 type SearchResult struct {
@@ -51,13 +54,12 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 	if err := chromedp.Run(
 		ctx,
 		chromedp.Navigate(url),
-		chromedp.WaitReady(s.ResultSelector),
+		chromedp.WaitReady(s.ResultReadySelector),
 		chromedp.Nodes(s.ResultSelector, &nodes, chromedp.ByQueryAll),
 	); err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Found %d:\n", len(nodes))
 	for i, node := range nodes {
 
 		item := SearchResult{
@@ -83,13 +85,12 @@ func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeRe
 	if err := chromedp.Run(
 		ctx,
 		chromedp.Navigate(url),
-		chromedp.WaitReady(s.EpisodeSelector),
-		chromedp.Nodes(s.EpisodeSelector, &nodes, chromedp.ByQueryAll),
+		chromedp.WaitReady(s.EpisodeReadySelector),
+		chromedp.Nodes(s.EpisodeSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Found %d episodes:\n", len(nodes))
 	for i, node := range nodes {
 
 		selector := fmt.Sprintf("%s:nth-child(%d)", s.EpisodeSelector, i+1)
@@ -120,14 +121,24 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 		}
 	})
 
-	if err := chromedp.Run(
-		ctx,
+	actions := []chromedp.Action{
 		network.Enable(),
 		chromedp.Navigate(url),
-		chromedp.WaitReady(s.EpisodeSelector),
-		chromedp.Click(episode.ClickSelector, chromedp.ByQuery),
-		chromedp.Sleep(3*time.Second),
-	); err != nil {
+	}
+
+	if episode.ClickSelector != "" {
+		actions = append(actions,
+			chromedp.WaitReady(s.EpisodeSelector),
+			chromedp.Click(episode.ClickSelector, chromedp.ByQuery),
+		)
+	} else {
+		// Just wait for the movie player!
+		actions = append(actions, chromedp.WaitReady(s.EpisodeReadySelector))
+	}
+
+	actions = append(actions, chromedp.Sleep(3*time.Second))
+
+	if err := chromedp.Run(ctx, actions...); err != nil {
 		log.Fatal(err)
 	}
 	return streamURL
@@ -139,4 +150,15 @@ func (r SearchResult) Print() {
 
 func (e EpisodeResult) Print() {
 	fmt.Printf("[%d] %s\n", e.Number, e.Name)
+}
+
+func (s SearchAttributes) PlayVideo(videoURL string) error {
+	cmd := exec.Command("mpv", videoURL)
+
+	// Connect mpv's output to the terminal
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Wait for mpv to close
+	return cmd.Run()
 }
