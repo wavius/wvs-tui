@@ -81,14 +81,18 @@ func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeRe
 
 	url := result.Link
 
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	var nodes []*cdp.Node
 	if err := chromedp.Run(
-		ctx,
+		timeoutCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitReady(s.EpisodeReadySelector),
+		chromedp.Sleep(3*time.Second),
 		chromedp.Nodes(s.EpisodeSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("could not find video: %w", err)
 	}
 
 	for i, node := range nodes {

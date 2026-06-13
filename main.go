@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 
 	"github.com/chromedp/chromedp"
 	"github.com/manifoldco/promptui"
@@ -14,7 +15,7 @@ import (
 var miruro scraper.SearchAttributes = scraper.SearchAttributes{
 	Site:   "https://www.miruro.to",
 	Search: "/search?query=",
-	Query:  "Naruto",
+	Query:  "",
 
 	// Result attributes
 	ResultReadySelector: "._styledCardWrapper_eylnt_1",
@@ -36,10 +37,24 @@ func main() {
 
 	var results []scraper.SearchResult
 	var episodes []scraper.EpisodeResult
-	err := miruro.SearchForQuery(ctx, &results)
-	if err != nil {
-		log.Fatal("Search failed:", err)
+
+	searchPrompt := promptui.Prompt{
+		Label: "Search:",
+		Templates: &promptui.PromptTemplates{
+			Prompt:  `{{ "?" | blue }} {{ . | bold }} `,
+			Valid:   `{{ "?" | blue }} {{ . | bold }} `,
+			Success: `{{ "✔" | green }} {{ . | bold }} `,
+		},
 	}
+
+	query, err := searchPrompt.Run()
+	errorFatal("Search prompt failed", err)
+
+	// Convert raw string to url query
+	miruro.Query = url.QueryEscape(query)
+
+	err = miruro.SearchForQuery(ctx, &results)
+	errorFatal("Search failed", err)
 
 	label := fmt.Sprintf("Found %d results", len(results))
 
@@ -56,13 +71,9 @@ func main() {
 	}
 
 	showIndex, _, err := prompt.Run()
-	if err != nil {
-		log.Fatal("Prompt failed:", err)
-	}
+	errorFatal("Result prompt failed", err)
 	err = miruro.GetEpisodes(ctx, &episodes, results[showIndex])
-	if err != nil {
-		log.Fatal("Episode fetch failed:", err)
-	}
+	errorFatal("Episode fetch failed", err)
 
 	if len(episodes) == 0 {
 		episodes = append(episodes, scraper.EpisodeResult{
@@ -88,20 +99,22 @@ func main() {
 	}
 
 	episodeIndex, _, err := prompt.Run()
-	if err != nil {
-		log.Fatal("Prompt failed:", err)
-	}
+	errorFatal("Episode prompt failed", err)
 
 	fmt.Println("\nGetting video stream...")
 	videoURL := miruro.GetVideo(ctx, episodes[episodeIndex], results[showIndex])
 
 	fmt.Println("\nPlaying...")
 	err = miruro.PlayVideo(videoURL)
-	if err != nil {
-		log.Fatal("MPV crashed or failed to start:", err)
-	}
+	errorFatal("MPV crashed or failed to start", err)
 }
 
 func clear() {
 	fmt.Print("\033[H\033[2J")
+}
+
+func errorFatal(msg string, err error) {
+	if err != nil {
+		log.Fatalf("%s: %v", msg, err)
+	}
 }
