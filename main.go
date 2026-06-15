@@ -35,6 +35,8 @@ func main() {
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
+	chromedp.Run(ctx)
+
 	var results []scraper.SearchResult
 	var episodes []scraper.EpisodeResult
 
@@ -102,7 +104,8 @@ func main() {
 	errorFatal("Episode prompt failed", err)
 
 	fmt.Println("\nGetting video stream...")
-	videoURL := miruro.GetVideo(ctx, episodes[episodeIndex], results[showIndex])
+	videoURL, err := miruro.GetVideo(ctx, episodes[episodeIndex], results[showIndex])
+	errorFatal("Failed to get video stream", err)
 
 	fmt.Println("\nPlaying...")
 	err = miruro.PlayVideo(videoURL)

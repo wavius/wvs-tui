@@ -3,7 +3,6 @@ package scraper
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -50,14 +49,17 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 
 	url := s.Site + s.Search + s.Query
 
+	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
 	var nodes []*cdp.Node
 	if err := chromedp.Run(
-		ctx,
+		timeoutCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitReady(s.ResultReadySelector),
-		chromedp.Nodes(s.ResultSelector, &nodes, chromedp.ByQueryAll),
+		chromedp.Nodes(s.ResultSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("no results found: %w", err)
 	}
 
 	for i, node := range nodes {
@@ -69,6 +71,7 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 		}
 
 		*results = append(*results, item)
+
 	}
 
 	return nil
@@ -81,7 +84,7 @@ func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeRe
 
 	url := result.Link
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	var nodes []*cdp.Node
@@ -89,7 +92,6 @@ func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeRe
 		timeoutCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitReady(s.EpisodeReadySelector),
-		chromedp.Sleep(3*time.Second),
 		chromedp.Nodes(s.EpisodeSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
 		return fmt.Errorf("could not find video: %w", err)
@@ -110,7 +112,7 @@ func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeRe
 	return nil
 }
 
-func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, result SearchResult) string {
+func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, result SearchResult) (string, error) {
 	url := result.Link
 	var streamURL string
 
@@ -142,10 +144,13 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 
 	actions = append(actions, chromedp.Sleep(3*time.Second))
 
-	if err := chromedp.Run(ctx, actions...); err != nil {
-		log.Fatal(err)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	if err := chromedp.Run(timeoutCtx, actions...); err != nil {
+		return "", fmt.Errorf("failed to extract video stream: %w", err)
 	}
-	return streamURL
+	return streamURL, nil
 }
 
 func (r SearchResult) Print() {
@@ -157,7 +162,7 @@ func (e EpisodeResult) Print() {
 }
 
 func (s SearchAttributes) PlayVideo(videoURL string) error {
-	cmd := exec.Command("mpv", videoURL)
+	cmd := exec.Command("mpv", "--hwdec=auto", "--profile=fast", "--quiet", videoURL)
 
 	// Connect mpv's output to the terminal
 	cmd.Stdout = os.Stdout
