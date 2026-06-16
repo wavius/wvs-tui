@@ -3,7 +3,6 @@ package scraper
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -36,11 +35,25 @@ type SearchResult struct {
 	Link   string
 }
 
+// list.Item interface for Bubbletea
+func (r SearchResult) Title() string       { return r.Name }
+func (r SearchResult) Description() string { return r.Link }
+func (r SearchResult) FilterValue() string { return r.Name }
+
 type EpisodeResult struct {
 	Name          string
 	Number        int
+	Link          string
+	isM3u8        bool
+	isPopulated   bool
+	isDownloading bool
 	ClickSelector string
 }
+
+// list.Item interface for Bubbletea
+func (r EpisodeResult) Title() string       { return r.Name }
+func (r EpisodeResult) Description() string { return r.Link }
+func (r EpisodeResult) FilterValue() string { return r.Name }
 
 func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchResult) error {
 	if results == nil {
@@ -138,7 +151,6 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 			chromedp.Click(episode.ClickSelector, chromedp.ByQuery),
 		)
 	} else {
-		// Just wait for the movie player!
 		actions = append(actions, chromedp.WaitReady(s.EpisodeReadySelector))
 	}
 
@@ -161,13 +173,7 @@ func (e EpisodeResult) Print() {
 	fmt.Printf("[%d] %s\n", e.Number, e.Name)
 }
 
-func (s SearchAttributes) PlayVideo(videoURL string) error {
-	cmd := exec.Command("mpv", "--hwdec=auto", "--profile=fast", "--quiet", videoURL)
-
-	// Connect mpv's output to the terminal
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Wait for mpv to close
-	return cmd.Run()
+func (s SearchAttributes) PlayVideo(videoURL string) *exec.Cmd {
+	// Run mpv
+	return exec.Command("mpv", "--hwdec=auto", "--profile=fast", "--quiet", videoURL)
 }

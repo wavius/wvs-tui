@@ -30,6 +30,10 @@ var miruro scraper.SearchAttributes = scraper.SearchAttributes{
 }
 
 func main() {
+	bubbletea_main()
+}
+
+func promptui_main() {
 	clear()
 
 	ctx, cancel := chromedp.NewContext(context.Background())
@@ -108,7 +112,7 @@ func main() {
 	errorFatal("Failed to get video stream", err)
 
 	fmt.Println("\nPlaying...")
-	err = miruro.PlayVideo(videoURL)
+	miruro.PlayVideo(videoURL)
 	errorFatal("MPV crashed or failed to start", err)
 }
 
