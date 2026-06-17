@@ -19,6 +19,45 @@ type AniListResponse struct {
 	} `json:"data"`
 }
 
+func FoundAnime(ctx context.Context, title string) bool {
+	query := `
+	query ($search: String) {
+		Media(search: $search, type: ANIME) {
+			id
+		}
+	}
+	`
+
+	payload := map[string]interface{}{
+		"query": query,
+		"variables": map[string]interface{}{
+			"search": title,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://graphql.anilist.co", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
+
+}
+
 // Queries the AniList GraphQL API to get an anime's description and cover image
 func FetchAniListInfo(ctx context.Context, title string) (string, string, error) {
 	query := `

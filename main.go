@@ -29,6 +29,23 @@ var miruro scraper.SearchAttributes = scraper.SearchAttributes{
 	EpisodeNameSelector:  "title",
 }
 
+var next scraper.SearchAttributes = scraper.SearchAttributes{
+	Site:   "",
+	Search: "",
+	Query:  "",
+
+	// Result attributes
+	ResultReadySelector: "",
+	ResultSelector:      "",
+	ResultNameSelector:  "",
+	ResultLinkSelector:  "",
+
+	// Episode attributes
+	EpisodeReadySelector: "",
+	EpisodeSelector:      "",
+	EpisodeNameSelector:  "",
+}
+
 func main() {
 	bubbletea_main()
 }
