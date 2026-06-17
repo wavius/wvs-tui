@@ -30,14 +30,22 @@ type SearchAttributes struct {
 }
 
 type SearchResult struct {
-	Name   string
-	Number int
-	Link   string
+	Name        string
+	Number      int
+	Link        string
+	Desc        string
+	ImgURL      string
+	RenderedImg string
 }
 
 // list.Item interface for Bubbletea
 func (r SearchResult) Title() string       { return r.Name }
-func (r SearchResult) Description() string { return r.Link }
+func (r SearchResult) Description() string {
+	if r.Desc != "" {
+		return r.Desc
+	}
+	return "No description available."
+}
 func (r SearchResult) FilterValue() string { return r.Name }
 
 type EpisodeResult struct {

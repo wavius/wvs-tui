@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"sync"
 
+	"github.com/blacktop/go-termimg"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/chromedp/chromedp"
 
 	"main/scraper"
@@ -49,7 +53,7 @@ func (m tuiModel) loadList(items []list.Item, title string, state AppState) tuiM
 	delegate := list.NewDefaultDelegate()
 	delegate.ShowDescription = false
 
-	m.resultList = list.New(items, delegate, m.width, m.height)
+	m.resultList = list.New(items, delegate, m.width/2, m.height)
 	m.resultList.Title = title
 	m.state = state
 	return m
@@ -139,8 +143,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		// Prevent nil pointer on initial load
-		if m.state == StateSelectResult {
-			m.resultList.SetSize(msg.Width, msg.Height)
+		if m.state == StateSelectResult || m.state == StateSelectEpisode {
+			m.resultList.SetSize(msg.Width/2, msg.Height)
 		}
 
 	case tea.KeyMsg:
@@ -201,7 +205,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) View() string {
 	if m.err != nil {
-		return fmt.Sprintf("\n  Error: %v\n\n  Press ESC to quit.", m.err)
+		return fmt.Sprintf("Error: %v\nPress ESC to quit.\n", m.err)
 	}
 
 	switch m.state {
@@ -212,8 +216,59 @@ func (m tuiModel) View() string {
 		)
 	case StateLoadingResults:
 		return "Loading Results...\n"
-	case StateSelectResult, StateSelectEpisode:
-		return "\n" + m.resultList.View()
+	case StateSelectResult:
+		listView := m.resultList.View()
+		rightPane := ""
+		item := m.resultList.SelectedItem()
+		if item != nil {
+			res := item.(scraper.SearchResult)
+			imgView := res.RenderedImg
+			descView := res.Desc
+
+			if imgView != "" || descView != "" {
+				rightWidth := (m.width / 2) - 10
+				if rightWidth < 20 {
+					rightWidth = 20
+				}
+				descStyle := lipgloss.NewStyle().Width(rightWidth).PaddingTop(1)
+				descView = descStyle.Render(descView)
+
+				rightPane = lipgloss.JoinVertical(lipgloss.Left, imgView, descView)
+			}
+		}
+
+		if rightPane != "" {
+			listView = lipgloss.NewStyle().Width(m.width / 2).Render(listView)
+			rightPane = lipgloss.NewStyle().PaddingLeft(5).Render(rightPane)
+			return "\n" + lipgloss.JoinHorizontal(lipgloss.Top, listView, rightPane)
+		}
+		return "\n" + listView
+
+	case StateSelectEpisode:
+		listView := m.resultList.View()
+		rightPane := ""
+
+		res := m.selectedResult
+		imgView := res.RenderedImg
+		descView := res.Desc
+
+		if imgView != "" || descView != "" {
+			rightWidth := (m.width / 2) - 10
+			if rightWidth < 20 {
+				rightWidth = 20
+			}
+			descStyle := lipgloss.NewStyle().Width(rightWidth).PaddingTop(1)
+			descView = descStyle.Render(descView)
+
+			rightPane = lipgloss.JoinVertical(lipgloss.Left, imgView, descView)
+		}
+
+		if rightPane != "" {
+			listView = lipgloss.NewStyle().Width(m.width / 2).Render(listView)
+			rightPane = lipgloss.NewStyle().PaddingLeft(5).Render(rightPane)
+			return "\n" + lipgloss.JoinHorizontal(lipgloss.Top, listView, rightPane)
+		}
+		return "\n" + listView
 	case StateLoadingEpisodes:
 		return "Loading Episodes...\n"
 	case StateLoadingVideo:
@@ -221,7 +276,7 @@ func (m tuiModel) View() string {
 	case StatePlayingVideo:
 		return "Playing Video...\n"
 	default:
-		return "Unknown State"
+		return "Unknown State\n"
 	}
 }
 
@@ -250,8 +305,43 @@ func searchQueryCmd(ctx context.Context, site scraper.SearchAttributes, query st
 
 		site.Query = query
 		err := site.SearchForQuery(ctx, &results)
+		if err != nil {
+			return resultSearchFinishedMsg{err: err}
+		}
 
-		return resultSearchFinishedMsg{results: results, err: err}
+		var wg sync.WaitGroup
+		for i := range results {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				desc, imgURL, _ := scraper.FetchAniListInfo(ctx, results[index].Name)
+				if desc != "" {
+					results[index].Desc = desc
+				}
+				if imgURL != "" {
+					results[index].ImgURL = imgURL
+
+					// Download and render the image
+					req, err := http.NewRequestWithContext(ctx, "GET", imgURL, nil)
+					if err == nil {
+						resp, err := http.DefaultClient.Do(req)
+						if err == nil {
+							defer resp.Body.Close()
+							img, err := termimg.From(resp.Body)
+							if err == nil {
+								widget := termimg.NewImageWidget(img)
+								widget.SetSize(105, 70).SetProtocol(termimg.Halfblocks)
+								rendered, _ := widget.Render()
+								results[index].RenderedImg = rendered
+							}
+						}
+					}
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		return resultSearchFinishedMsg{results: results, err: nil}
 	}
 }
 
@@ -265,6 +355,14 @@ func episodeQueryCmd(ctx context.Context, site scraper.SearchAttributes, result 
 		var episodes []scraper.EpisodeResult
 
 		err := site.GetEpisodes(ctx, &episodes, result)
+
+		if len(episodes) == 0 {
+			episodes = append(episodes, scraper.EpisodeResult{
+				Name:          "Movie",
+				Number:        1,
+				ClickSelector: "",
+			})
+		}
 
 		return episodeSearchFinishedMsg{episodes: episodes, err: err}
 	}
