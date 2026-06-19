@@ -12,10 +12,18 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+type MediaType int
+
+const (
+	Anime MediaType = iota
+	Show
+)
+
 type SearchAttributes struct {
 	Site   string
 	Search string
 	Query  string
+	Type   MediaType
 
 	// Search selectors
 	ResultReadySelector string // css
@@ -36,6 +44,7 @@ type SearchResult struct {
 	Desc        string
 	ImgURL      string
 	RenderedImg string
+	Source      SearchAttributes
 }
 
 // list.Item interface for Bubbletea
@@ -89,6 +98,7 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 			Name:   node.AttributeValue(s.ResultNameSelector),
 			Number: i + 1,
 			Link:   s.Site + node.AttributeValue(s.ResultLinkSelector),
+			Source: s,
 		}
 
 		*results = append(*results, item)

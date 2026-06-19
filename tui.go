@@ -32,7 +32,7 @@ const (
 type tuiModel struct {
 	// Core state
 	ctx   context.Context
-	site  scraper.SearchAttributes
+	sites []scraper.SearchAttributes
 	state AppState
 	err   error
 
@@ -59,7 +59,7 @@ func (m tuiModel) loadList(items []list.Item, title string, state AppState) tuiM
 	return m
 }
 
-func initialModel(ctx context.Context, site scraper.SearchAttributes) tuiModel {
+func initialModel(ctx context.Context, sites []scraper.SearchAttributes) tuiModel {
 	ti := textinput.New()
 	ti.Placeholder = "..."
 	ti.Focus()
@@ -70,7 +70,7 @@ func initialModel(ctx context.Context, site scraper.SearchAttributes) tuiModel {
 		state:       StateSearch,
 		searchInput: ti,
 		ctx:         ctx,
-		site:        site,
+		sites:       sites,
 	}
 }
 
@@ -120,7 +120,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StatePlayingVideo
 
 		// Suspend the TUI while video plays, restore it when done
-		c := m.site.PlayVideo(videoURL)
+		c := m.selectedResult.Source.PlayVideo(videoURL)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return videoPlaybackFinishedMsg{err}
 		})
@@ -156,19 +156,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case StateSearch:
 				if m.searchInput.Value() != "" {
 					m.state = StateLoadingResults
-					return m, searchQueryCmd(m.ctx, m.site, m.searchInput.Value())
+					return m, searchQueryCmd(m.ctx, m.sites, m.searchInput.Value())
 				}
 			case StateSelectResult:
 				if m.resultList.SelectedItem() != nil {
 					m.state = StateLoadingEpisodes
 					m.selectedResult = m.resultList.SelectedItem().(scraper.SearchResult)
-					return m, episodeQueryCmd(m.ctx, m.site, m.selectedResult)
+					return m, episodeQueryCmd(m.ctx, m.selectedResult)
 				}
 			case StateSelectEpisode:
 				if m.resultList.SelectedItem() != nil {
 					m.state = StateLoadingVideo
 					episode := m.resultList.SelectedItem().(scraper.EpisodeResult)
-					return m, videoQueryCmd(m.ctx, m.site, episode, m.selectedResult)
+					return m, videoQueryCmd(m.ctx, episode, m.selectedResult)
 				}
 			case StatePlayingVideo:
 				return m, nil
@@ -286,7 +286,7 @@ func bubbletea_main() {
 
 	chromedp.Run(ctx)
 
-	p := tea.NewProgram(initialModel(ctx, miruro), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(ctx, Sites), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)
 	}
@@ -299,14 +299,35 @@ type resultSearchFinishedMsg struct {
 	err     error
 }
 
-func searchQueryCmd(ctx context.Context, site scraper.SearchAttributes, query string) tea.Cmd {
+func searchQueryCmd(ctx context.Context, sites []scraper.SearchAttributes, query string) tea.Cmd {
 	return func() tea.Msg {
 		var results []scraper.SearchResult
 
-		site.Query = query
-		err := site.SearchForQuery(ctx, &results)
-		if err != nil {
-			return resultSearchFinishedMsg{err: err}
+		for _, site := range sites {
+			if site.Site == "" {
+				continue
+			}
+			if site.Type == scraper.Anime {
+				if !scraper.FoundAnime(ctx, query) {
+					continue
+				}
+			}
+
+			site.Query = query
+			var siteResults []scraper.SearchResult
+			err := site.SearchForQuery(ctx, &siteResults)
+			if err == nil {
+				results = append(results, siteResults...)
+			}
+		}
+
+		if len(results) == 0 {
+			return resultSearchFinishedMsg{err: fmt.Errorf("no results found")}
+		}
+
+		// Update numbering
+		for i := range results {
+			results[i].Number = i + 1
 		}
 
 		var wg sync.WaitGroup
@@ -350,11 +371,11 @@ type episodeSearchFinishedMsg struct {
 	err      error
 }
 
-func episodeQueryCmd(ctx context.Context, site scraper.SearchAttributes, result scraper.SearchResult) tea.Cmd {
+func episodeQueryCmd(ctx context.Context, result scraper.SearchResult) tea.Cmd {
 	return func() tea.Msg {
 		var episodes []scraper.EpisodeResult
 
-		err := site.GetEpisodes(ctx, &episodes, result)
+		err := result.Source.GetEpisodes(ctx, &episodes, result)
 
 		if len(episodes) == 0 {
 			episodes = append(episodes, scraper.EpisodeResult{
@@ -373,9 +394,9 @@ type videoQueryFinishedMsg struct {
 	err      error
 }
 
-func videoQueryCmd(ctx context.Context, site scraper.SearchAttributes, episode scraper.EpisodeResult, result scraper.SearchResult) tea.Cmd {
+func videoQueryCmd(ctx context.Context, episode scraper.EpisodeResult, result scraper.SearchResult) tea.Cmd {
 	return func() tea.Msg {
-		videoURL, err := site.GetVideo(ctx, episode, result)
+		videoURL, err := result.Source.GetVideo(ctx, episode, result)
 		return videoQueryFinishedMsg{videoURL: videoURL, err: err}
 	}
 }

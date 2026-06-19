@@ -16,6 +16,7 @@ var miruro scraper.SearchAttributes = scraper.SearchAttributes{
 	Site:   "https://www.miruro.to",
 	Search: "/search?query=",
 	Query:  "",
+	Type:   scraper.Anime,
 
 	// Result attributes
 	ResultReadySelector: "._styledCardWrapper_eylnt_1",
@@ -33,6 +34,7 @@ var next scraper.SearchAttributes = scraper.SearchAttributes{
 	Site:   "",
 	Search: "",
 	Query:  "",
+	Type:   scraper.Show,
 
 	// Result attributes
 	ResultReadySelector: "",
@@ -45,6 +47,8 @@ var next scraper.SearchAttributes = scraper.SearchAttributes{
 	EpisodeSelector:      "",
 	EpisodeNameSelector:  "",
 }
+
+var Sites = []scraper.SearchAttributes{miruro, next}
 
 func main() {
 	bubbletea_main()
@@ -74,10 +78,25 @@ func promptui_main() {
 	errorFatal("Search prompt failed", err)
 
 	// Convert raw string to url query
-	miruro.Query = url.QueryEscape(query)
+	query = url.QueryEscape(query)
 
-	err = miruro.SearchForQuery(ctx, &results)
-	errorFatal("Search failed", err)
+	for _, site := range Sites {
+		if site.Site == "" {
+			continue
+		}
+		if site.Type == scraper.Anime {
+			if !scraper.FoundAnime(ctx, query) {
+				continue
+			}
+		}
+
+		site.Query = query
+		_ = site.SearchForQuery(ctx, &results)
+	}
+
+	if len(results) == 0 {
+		errorFatal("Search failed", fmt.Errorf("no results found"))
+	}
 
 	label := fmt.Sprintf("Found %d results", len(results))
 
@@ -95,7 +114,8 @@ func promptui_main() {
 
 	showIndex, _, err := prompt.Run()
 	errorFatal("Result prompt failed", err)
-	err = miruro.GetEpisodes(ctx, &episodes, results[showIndex])
+	selectedResult := results[showIndex]
+	err = selectedResult.Source.GetEpisodes(ctx, &episodes, selectedResult)
 	errorFatal("Episode fetch failed", err)
 
 	if len(episodes) == 0 {
@@ -125,11 +145,11 @@ func promptui_main() {
 	errorFatal("Episode prompt failed", err)
 
 	fmt.Println("\nGetting video stream...")
-	videoURL, err := miruro.GetVideo(ctx, episodes[episodeIndex], results[showIndex])
+	videoURL, err := selectedResult.Source.GetVideo(ctx, episodes[episodeIndex], selectedResult)
 	errorFatal("Failed to get video stream", err)
 
 	fmt.Println("\nPlaying...")
-	miruro.PlayVideo(videoURL)
+	selectedResult.Source.PlayVideo(videoURL)
 	errorFatal("MPV crashed or failed to start", err)
 }
 
