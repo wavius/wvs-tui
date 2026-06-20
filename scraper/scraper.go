@@ -2,7 +2,9 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,7 +18,8 @@ type MediaType int
 
 const (
 	Anime MediaType = iota
-	Show
+	ShowsAndMovies
+	All
 )
 
 type SearchAttributes struct {
@@ -27,14 +30,17 @@ type SearchAttributes struct {
 
 	// Search selectors
 	ResultReadySelector string // css
-	ResultSelector      string // css
-	ResultNameSelector  string // html
-	ResultLinkSelector  string // html
+	ResultContainer     string // css
+	ResultNameClass     string // css class inside container
+	ResultNameAttr      string // html attribute
+	ResultLinkClass     string // css class inside container
+	ResultLinkAttr      string // html attribute
 
 	// Episode selectors
 	EpisodeReadySelector string // css
-	EpisodeSelector      string // css
-	EpisodeNameSelector  string // html
+	EpisodeContainer     string // css
+	EpisodeNameClass     string // css class inside container
+	EpisodeNameAttr      string // html attribute
 }
 
 type SearchResult struct {
@@ -48,7 +54,7 @@ type SearchResult struct {
 }
 
 // list.Item interface for Bubbletea
-func (r SearchResult) Title() string       { return r.Name }
+func (r SearchResult) Title() string { return r.Name }
 func (r SearchResult) Description() string {
 	if r.Desc != "" {
 		return r.Desc
@@ -61,9 +67,6 @@ type EpisodeResult struct {
 	Name          string
 	Number        int
 	Link          string
-	isM3u8        bool
-	isPopulated   bool
-	isDownloading bool
 	ClickSelector string
 }
 
@@ -87,7 +90,7 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 		timeoutCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitReady(s.ResultReadySelector),
-		chromedp.Nodes(s.ResultSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
+		chromedp.Nodes(s.ResultContainer, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
 		return fmt.Errorf("no results found: %w", err)
 	}
@@ -95,9 +98,9 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 	for i, node := range nodes {
 
 		item := SearchResult{
-			Name:   node.AttributeValue(s.ResultNameSelector),
+			Name:   extractNodeData(timeoutCtx, node, s.ResultNameClass, s.ResultNameAttr),
 			Number: i + 1,
-			Link:   s.Site + node.AttributeValue(s.ResultLinkSelector),
+			Link:   s.Site + extractNodeData(timeoutCtx, node, s.ResultLinkClass, s.ResultLinkAttr),
 			Source: s,
 		}
 
@@ -123,17 +126,17 @@ func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeRe
 		timeoutCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitReady(s.EpisodeReadySelector),
-		chromedp.Nodes(s.EpisodeSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
+		chromedp.Nodes(s.EpisodeContainer, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
 		return fmt.Errorf("could not find video: %w", err)
 	}
 
 	for i, node := range nodes {
 
-		selector := fmt.Sprintf("%s:nth-child(%d)", s.EpisodeSelector, i+1)
+		selector := fmt.Sprintf(`document.querySelectorAll("%s")[%d].click()`, s.EpisodeContainer, i)
 
 		item := EpisodeResult{
-			Name:          node.AttributeValue(s.EpisodeNameSelector),
+			Name:          extractNodeData(timeoutCtx, node, s.EpisodeNameClass, s.EpisodeNameAttr),
 			Number:        i + 1,
 			ClickSelector: selector,
 		}
@@ -168,8 +171,8 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 
 	if episode.ClickSelector != "" {
 		actions = append(actions,
-			chromedp.WaitReady(s.EpisodeSelector),
-			chromedp.Click(episode.ClickSelector, chromedp.ByQuery),
+			chromedp.WaitReady(s.EpisodeContainer),
+			chromedp.Evaluate(episode.ClickSelector, nil),
 		)
 	} else {
 		actions = append(actions, chromedp.WaitReady(s.EpisodeReadySelector))
@@ -194,7 +197,70 @@ func (e EpisodeResult) Print() {
 	fmt.Printf("[%d] %s\n", e.Number, e.Name)
 }
 
+func textContent(n *cdp.Node) string {
+	if n.NodeType == cdp.NodeTypeText {
+		return n.NodeValue
+	}
+	var s strings.Builder
+	for _, c := range n.Children {
+		s.WriteString(textContent(c))
+	}
+	return s.String()
+}
+
+func extractNodeData(ctx context.Context, parent *cdp.Node, cssClass string, attr string) string {
+	if attr == "text" {
+		if cssClass != "" {
+			var text string
+			err := chromedp.Run(ctx, chromedp.Text(cssClass, &text, chromedp.ByQuery, chromedp.FromNode(parent)))
+			if err == nil {
+				return strings.TrimSpace(text)
+			}
+		}
+		return strings.TrimSpace(textContent(parent))
+	}
+
+	target := parent
+	if cssClass != "" {
+		var found []*cdp.Node
+		err := chromedp.Run(ctx, chromedp.Nodes(cssClass, &found, chromedp.ByQuery, chromedp.AtLeast(0), chromedp.FromNode(parent)))
+		if err == nil && len(found) > 0 {
+			target = found[0]
+		}
+	}
+
+	return target.AttributeValue(attr)
+}
+
 func (s SearchAttributes) PlayVideo(videoURL string) *exec.Cmd {
-	// Run mpv
+	// Unwrap url if it is behind a stream-proxy
+	parsed, err := url.Parse(videoURL)
+	if err == nil && strings.Contains(parsed.Path, "/stream-proxy/pl") {
+		u := parsed.Query().Get("u")
+		if u != "" {
+			videoURL = u
+		}
+
+		h := parsed.Query().Get("h")
+		if h != "" {
+			var headers map[string]string
+			if json.Unmarshal([]byte(h), &headers) == nil {
+				var headerArgs []string
+				if ref, ok := headers["Referer"]; ok {
+					headerArgs = append(headerArgs, "Referer: "+ref)
+				}
+				if orig, ok := headers["Origin"]; ok {
+					headerArgs = append(headerArgs, "Origin: "+orig)
+				}
+
+				if len(headerArgs) > 0 {
+					headerArg := "--http-header-fields=" + strings.Join(headerArgs, ",")
+					return exec.Command("mpv", "--hwdec=auto", "--profile=fast", "--quiet", headerArg, videoURL)
+				}
+			}
+		}
+	}
+
+	// Default run mpv
 	return exec.Command("mpv", "--hwdec=auto", "--profile=fast", "--quiet", videoURL)
 }

@@ -275,13 +275,19 @@ func (m tuiModel) View() string {
 	}
 }
 
-func bubbletea_main() {
-	ctx, cancel := chromedp.NewContext(context.Background())
+func bubbletea_main(sites []scraper.SearchAttributes) {
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("disable-site-isolation-trials", true),
+	)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancelAlloc()
+
+	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	chromedp.Run(ctx)
 
-	p := tea.NewProgram(initialModel(ctx, Sites), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(ctx, sites), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)
 	}
@@ -304,6 +310,10 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SearchAttributes, query
 			}
 			if site.Type == scraper.Anime {
 				if !scraper.FoundAnime(ctx, query) {
+					continue
+				}
+			} else if site.Type == scraper.ShowsAndMovies {
+				if !scraper.FoundTMDB(ctx, query) {
 					continue
 				}
 			}
@@ -330,7 +340,7 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SearchAttributes, query
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
-				desc, imgURL, _ := scraper.FetchAniListInfo(ctx, results[index].Name)
+				desc, imgURL, _ := scraper.FetchTMDBInfo(ctx, results[index].Name)
 				if desc != "" {
 					results[index].Desc = desc
 				}
