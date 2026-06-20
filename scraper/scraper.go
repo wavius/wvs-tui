@@ -147,8 +147,11 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 	url := result.Link
 	var streamURL string
 
+	tabCtx, cancelTab := chromedp.NewContext(ctx)
+	defer cancelTab()
+
 	// Subscribe to network events
-	chromedp.ListenTarget(ctx, func(ev any) {
+	chromedp.ListenTarget(tabCtx, func(ev any) {
 		switch e := ev.(type) {
 		// Check if the event type contains ".m3u8" or ".mp4"
 		case *network.EventRequestWillBeSent:
@@ -174,7 +177,7 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 
 	actions = append(actions, chromedp.Sleep(3*time.Second))
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(tabCtx, 15*time.Second)
 	defer cancel()
 
 	if err := chromedp.Run(timeoutCtx, actions...); err != nil {

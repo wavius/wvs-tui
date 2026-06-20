@@ -131,13 +131,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Reload episodes after mpv closes
-		var items []list.Item
-		for _, eps := range m.episodes {
-			items = append(items, eps)
-		}
-
-		return m.loadList(items, "Select Episode", StateSelectEpisode), nil
+		m.state = StateSelectEpisode
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
