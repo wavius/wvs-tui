@@ -19,4 +19,10 @@ clean:
 run: all
 	./$(BUILD_DIR)/$(TARGET)
 
-.PHONY: all setup clean run
+# Install the executable as wvs-tui
+install: all
+	@mkdir -p ~/.local/bin
+	cp $(BUILD_DIR)/$(TARGET) ~/.local/bin/wvs
+	@echo "Installed wvs to ~/.local/bin/wvs. Ensure ~/.local/bin is in your PATH."
+
+.PHONY: all setup clean run install

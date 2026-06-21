@@ -50,6 +50,8 @@ type SearchAttributes struct {
 	ResultNameAttr      string // html attr
 	ResultLinkClass     string // css
 	ResultLinkAttr      string // html attr
+	ResultDateClass     string // css
+	ResultDateAttr      string // html attr
 
 	// Season selectors
 	SeasonContainerSelector string // css
@@ -70,6 +72,7 @@ type SearchAttributes struct {
 type SearchResult struct {
 	Name        string
 	Number      int
+	Date        string
 	Link        string
 	Desc        string
 	ImgURL      string
@@ -80,10 +83,10 @@ type SearchResult struct {
 // list.Item interface for Bubbletea
 func (r SearchResult) Title() string { return r.Name }
 func (r SearchResult) Description() string {
-	if r.Desc != "" {
-		return r.Desc
+	if r.Date != "" {
+		return r.Date
 	}
-	return "No description available."
+	return "No date available."
 }
 func (r SearchResult) FilterValue() string { return r.Name }
 
@@ -134,10 +137,15 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 	}
 
 	for i, node := range nodes {
+		date := ""
+		if s.ResultDateClass != "" {
+			date = extractNodeData(timeoutCtx, node, s.ResultDateClass, s.ResultDateAttr)
+		}
 
 		item := SearchResult{
 			Name:   extractNodeData(timeoutCtx, node, s.ResultNameClass, s.ResultNameAttr),
 			Number: i + 1,
+			Date:   date,
 			Link:   s.Site + extractNodeData(timeoutCtx, node, s.ResultLinkClass, s.ResultLinkAttr),
 			Source: s,
 		}
@@ -166,7 +174,7 @@ func (s SearchAttributes) GetSeasons(ctx context.Context, seasons *[]SeasonResul
 	if err := chromedp.Run(
 		timeoutCtx,
 		chromedp.Navigate(url),
-		chromedp.WaitReady(s.SeasonContainerSelector),
+		chromedp.WaitReady(s.EpisodeReadySelector),
 		chromedp.Nodes(s.SeasonContainerSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
 		return fmt.Errorf("could not find seasons: %w", err)
@@ -315,10 +323,14 @@ func textContent(n *cdp.Node) string {
 func extractNodeData(ctx context.Context, parent *cdp.Node, cssClass string, attr string) string {
 	if attr == "text" {
 		if cssClass != "" {
-			var text string
-			err := chromedp.Run(ctx, chromedp.Text(cssClass, &text, chromedp.ByQuery, chromedp.FromNode(parent)))
-			if err == nil {
-				return strings.TrimSpace(text)
+			var found []*cdp.Node
+			err := chromedp.Run(ctx, chromedp.Nodes(cssClass, &found, chromedp.ByQuery, chromedp.AtLeast(0), chromedp.FromNode(parent)))
+			if err == nil && len(found) > 0 {
+				var text string
+				err = chromedp.Run(ctx, chromedp.Text(cssClass, &text, chromedp.ByQuery, chromedp.FromNode(parent)))
+				if err == nil {
+					return strings.TrimSpace(text)
+				}
 			}
 		}
 		return strings.TrimSpace(textContent(parent))

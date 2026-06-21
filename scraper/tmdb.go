@@ -7,13 +7,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 )
 
 type TMDBResponse struct {
 	Results []struct {
-		Overview   string `json:"overview"`
-		PosterPath string `json:"poster_path"`
+		Overview     string `json:"overview"`
+		PosterPath   string `json:"poster_path"`
+		ReleaseDate  string `json:"release_date"`
+		FirstAirDate string `json:"first_air_date"`
 	} `json:"results"`
 }
 
@@ -24,7 +27,7 @@ func FoundTMDB(ctx context.Context, title string) bool {
 	if apiKey == "" {
 		apiKey = os.Getenv("TMDB_API_KEY")
 	}
-	
+
 	if apiKey == "" {
 		return false
 	}
@@ -56,7 +59,7 @@ func FoundTMDB(ctx context.Context, title string) bool {
 }
 
 // Queries the TMDB API to get a media's description and cover image
-func FetchTMDBInfo(ctx context.Context, title string) (string, string, error) {
+func FetchTMDBInfo(ctx context.Context, title string, year string) (string, string, error) {
 	apiKey := TMDBApiKey
 	if apiKey == "" {
 		apiKey = os.Getenv("TMDB_API_KEY")
@@ -93,10 +96,28 @@ func FetchTMDBInfo(ctx context.Context, title string) (string, string, error) {
 		return "", "", fmt.Errorf("no results found")
 	}
 
-	desc := apiResp.Results[0].Overview
+	// Extract 4-digit year from the scraped year string
+	var parsedYear string
+	re := regexp.MustCompile(`\b(19|20)\d{2}\b`)
+	matches := re.FindStringSubmatch(year)
+	if len(matches) > 0 {
+		parsedYear = matches[0]
+	}
+
+	bestResultIndex := 0
+	if parsedYear != "" {
+		for i, res := range apiResp.Results {
+			if strings.HasPrefix(res.ReleaseDate, parsedYear) || strings.HasPrefix(res.FirstAirDate, parsedYear) {
+				bestResultIndex = i
+				break
+			}
+		}
+	}
+
+	desc := apiResp.Results[bestResultIndex].Overview
 	var imgURL string
-	if apiResp.Results[0].PosterPath != "" {
-		imgURL = "https://image.tmdb.org/t/p/w500" + apiResp.Results[0].PosterPath
+	if apiResp.Results[bestResultIndex].PosterPath != "" {
+		imgURL = "https://image.tmdb.org/t/p/w500" + apiResp.Results[bestResultIndex].PosterPath
 	}
 
 	// Clean up excess whitespace

@@ -2,6 +2,8 @@ package main
 
 import (
 	"main/scraper"
+	"os"
+	"strings"
 )
 
 var miruro scraper.SearchAttributes = scraper.SearchAttributes{
@@ -17,6 +19,8 @@ var miruro scraper.SearchAttributes = scraper.SearchAttributes{
 	ResultNameAttr:      "title",
 	ResultLinkClass:     "",
 	ResultLinkAttr:      "href",
+	ResultDateClass:     "",
+	ResultDateAttr:      "",
 
 	// Season attributes
 	SeasonContainerSelector: "",
@@ -47,7 +51,8 @@ var streamvaults scraper.SearchAttributes = scraper.SearchAttributes{
 	ResultNameAttr:      "text",
 	ResultLinkClass:     "",
 	ResultLinkAttr:      "href",
-
+	ResultDateClass:     ".bg-transparent",
+	ResultDateAttr:      "text",
 	// Season attributes
 	SeasonContainerSelector: ".ml-auto.bg-zinc-800.border option",
 	SeasonClickSelector:     "",
@@ -67,8 +72,13 @@ var streamvaults scraper.SearchAttributes = scraper.SearchAttributes{
 var Sites = []scraper.SearchAttributes{ /*miruro,*/ streamvaults}
 
 func main() {
+	var query string
+	if len(os.Args) > 1 {
+		query = strings.Join(os.Args[1:], " ")
+	}
+
 	// tui
-	bubbletea_main(Sites)
+	bubbletea_main(Sites, query)
 
 	// cli (debug)
 	// promptui_main(Sites)

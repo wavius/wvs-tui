@@ -53,9 +53,9 @@ type tuiModel struct {
 }
 
 // Helper to load items into list
-func (m tuiModel) loadList(items []list.Item, title string, state AppState) tuiModel {
+func (m tuiModel) loadList(items []list.Item, title string, state AppState, showDesc bool) tuiModel {
 	delegate := list.NewDefaultDelegate()
-	delegate.ShowDescription = false
+	delegate.ShowDescription = showDesc
 
 	m.resultList = list.New(items, delegate, m.width/2, m.height)
 	m.resultList.Title = title
@@ -63,15 +63,21 @@ func (m tuiModel) loadList(items []list.Item, title string, state AppState) tuiM
 	return m
 }
 
-func initialModel(ctx context.Context, sites []scraper.SearchAttributes) tuiModel {
+func initialModel(ctx context.Context, sites []scraper.SearchAttributes, initialQuery string) tuiModel {
 	ti := textinput.New()
 	ti.Placeholder = "..."
 	ti.Focus()
 	ti.CharLimit = 150
 	ti.Width = 40
 
+	state := StateSearch
+	if initialQuery != "" {
+		ti.SetValue(initialQuery)
+		state = StateLoadingResults
+	}
+
 	return tuiModel{
-		state:       StateSearch,
+		state:       state,
 		searchInput: ti,
 		ctx:         ctx,
 		sites:       sites,
@@ -79,6 +85,9 @@ func initialModel(ctx context.Context, sites []scraper.SearchAttributes) tuiMode
 }
 
 func (m tuiModel) Init() tea.Cmd {
+	if m.state == StateLoadingResults {
+		return tea.Batch(textinput.Blink, searchQueryCmd(m.ctx, m.sites, m.searchInput.Value()))
+	}
 	return textinput.Blink
 }
 
@@ -98,12 +107,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items = append(items, res)
 		}
 
-		return m.loadList(items, "Select Result", StateSelectResult), nil
+		return m.loadList(items, "Select Result", StateSelectResult, true), nil
 
 	case seasonSearchFinishedMsg:
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
+		}
+
+		if len(msg.seasons) == 0 {
+			m.state = StateLoadingEpisodes
+			return m, episodeQueryCmd(m.ctx, m.selectedResult, nil)
 		}
 
 		m.seasons = msg.seasons
@@ -112,7 +126,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items = append(items, s)
 		}
 
-		return m.loadList(items, "Select Season", StateSelectSeason), nil
+		return m.loadList(items, "Select Season", StateSelectSeason, false), nil
 
 	case episodeSearchFinishedMsg:
 		if msg.err != nil {
@@ -126,7 +140,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items = append(items, eps)
 		}
 
-		return m.loadList(items, "Select Episode", StateSelectEpisode), nil
+		return m.loadList(items, "Select Episode", StateSelectEpisode, false), nil
 
 	case videoQueryFinishedMsg:
 		if msg.err != nil {
@@ -212,20 +226,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				for _, res := range m.results {
 					items = append(items, res)
 				}
-				m = m.loadList(items, "Select Result", StateSelectResult)
+				m = m.loadList(items, "Select Result", StateSelectResult, true)
 			case StateSelectEpisode:
-				if m.selectedResult.Source.SeasonContainerSelector != "" {
+				if m.selectedResult.Source.SeasonContainerSelector != "" && len(m.seasons) > 0 {
 					var items []list.Item
 					for _, s := range m.seasons {
 						items = append(items, s)
 					}
-					m = m.loadList(items, "Select Season", StateSelectSeason)
+					m = m.loadList(items, "Select Season", StateSelectSeason, false)
 				} else {
 					var items []list.Item
 					for _, res := range m.results {
 						items = append(items, res)
 					}
-					m = m.loadList(items, "Select Result", StateSelectResult)
+					m = m.loadList(items, "Select Result", StateSelectResult, true)
 				}
 			}
 		}
@@ -346,7 +360,7 @@ func (m tuiModel) View() string {
 	}
 }
 
-func bubbletea_main(sites []scraper.SearchAttributes) {
+func bubbletea_main(sites []scraper.SearchAttributes, initialQuery string) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("disable-site-isolation-trials", true),
 	)
@@ -356,7 +370,7 @@ func bubbletea_main(sites []scraper.SearchAttributes) {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	p := tea.NewProgram(initialModel(ctx, sites), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(ctx, sites, initialQuery), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)
 	}
@@ -409,7 +423,7 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SearchAttributes, query
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
-				desc, imgURL, _ := scraper.FetchTMDBInfo(ctx, results[index].Name)
+				desc, imgURL, _ := scraper.FetchTMDBInfo(ctx, results[index].Name, results[index].Date)
 				if desc != "" {
 					results[index].Desc = desc
 				}
