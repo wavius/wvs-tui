@@ -23,6 +23,8 @@ const (
 	StateSearch AppState = iota
 	StateLoadingResults
 	StateSelectResult
+	StateLoadingSeasons
+	StateSelectSeason
 	StateLoadingEpisodes
 	StateSelectEpisode
 	StateLoadingVideo
@@ -45,6 +47,8 @@ type tuiModel struct {
 	// Cached data
 	selectedResult scraper.SearchResult
 	results        []scraper.SearchResult
+	selectedSeason *scraper.SeasonResult
+	seasons        []scraper.SeasonResult
 	episodes       []scraper.EpisodeResult
 }
 
@@ -96,6 +100,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m.loadList(items, "Select Result", StateSelectResult), nil
 
+	case seasonSearchFinishedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+
+		m.seasons = msg.seasons
+		var items []list.Item
+		for _, s := range msg.seasons {
+			items = append(items, s)
+		}
+
+		return m.loadList(items, "Select Season", StateSelectSeason), nil
+
 	case episodeSearchFinishedMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -138,7 +156,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		// Prevent nil pointer on initial load
-		if m.state == StateSelectResult || m.state == StateSelectEpisode {
+		if m.state == StateSelectResult || m.state == StateSelectSeason || m.state == StateSelectEpisode {
 			m.resultList.SetSize(msg.Width/2, msg.Height)
 		}
 
@@ -155,9 +173,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case StateSelectResult:
 				if m.resultList.SelectedItem() != nil {
-					m.state = StateLoadingEpisodes
 					m.selectedResult = m.resultList.SelectedItem().(scraper.SearchResult)
-					return m, episodeQueryCmd(m.ctx, m.selectedResult)
+					if m.selectedResult.Source.SeasonContainerSelector != "" {
+						m.state = StateLoadingSeasons
+						return m, seasonQueryCmd(m.ctx, m.selectedResult)
+					} else {
+						m.state = StateLoadingEpisodes
+						return m, episodeQueryCmd(m.ctx, m.selectedResult, nil)
+					}
+				}
+			case StateSelectSeason:
+				if m.resultList.SelectedItem() != nil {
+					m.state = StateLoadingEpisodes
+					season := m.resultList.SelectedItem().(scraper.SeasonResult)
+					m.selectedSeason = &season
+					return m, episodeQueryCmd(m.ctx, m.selectedResult, &season)
 				}
 			case StateSelectEpisode:
 				if m.resultList.SelectedItem() != nil {
@@ -176,14 +206,27 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Clear search bar
 				m.searchInput.SetValue("")
 				m.state = StateSearch
-			case StateSelectEpisode:
+			case StateSelectSeason:
 				// Reload results
 				var items []list.Item
 				for _, res := range m.results {
 					items = append(items, res)
 				}
-
 				m = m.loadList(items, "Select Result", StateSelectResult)
+			case StateSelectEpisode:
+				if m.selectedResult.Source.SeasonContainerSelector != "" {
+					var items []list.Item
+					for _, s := range m.seasons {
+						items = append(items, s)
+					}
+					m = m.loadList(items, "Select Season", StateSelectSeason)
+				} else {
+					var items []list.Item
+					for _, res := range m.results {
+						items = append(items, res)
+					}
+					m = m.loadList(items, "Select Result", StateSelectResult)
+				}
 			}
 		}
 	}
@@ -191,7 +234,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case StateSearch:
 		m.searchInput, cmd = m.searchInput.Update(msg)
-	case StateSelectResult, StateSelectEpisode:
+	case StateSelectResult, StateSelectSeason, StateSelectEpisode:
 		m.resultList, cmd = m.resultList.Update(msg)
 	}
 
@@ -230,6 +273,34 @@ func (m tuiModel) View() string {
 
 				rightPane = lipgloss.JoinVertical(lipgloss.Left, imgView, descView)
 			}
+		}
+
+		if rightPane != "" {
+			listView = lipgloss.NewStyle().Width(m.width / 2).Render(listView)
+			rightPane = lipgloss.NewStyle().PaddingLeft(5).Render(rightPane)
+			return "\n" + lipgloss.JoinHorizontal(lipgloss.Top, listView, rightPane)
+		}
+		return "\n" + listView
+
+	case StateLoadingSeasons:
+		return "Loading Seasons...\n"
+	case StateSelectSeason:
+		listView := m.resultList.View()
+		rightPane := ""
+
+		res := m.selectedResult
+		imgView := res.RenderedImg
+		descView := res.Desc
+
+		if imgView != "" || descView != "" {
+			rightWidth := (m.width / 2) - 10
+			if rightWidth < 20 {
+				rightWidth = 20
+			}
+			descStyle := lipgloss.NewStyle().Width(rightWidth).PaddingTop(1)
+			descView = descStyle.Render(descView)
+
+			rightPane = lipgloss.JoinVertical(lipgloss.Left, imgView, descView)
 		}
 
 		if rightPane != "" {
@@ -284,8 +355,6 @@ func bubbletea_main(sites []scraper.SearchAttributes) {
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
-
-	chromedp.Run(ctx)
 
 	p := tea.NewProgram(initialModel(ctx, sites), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
@@ -371,16 +440,31 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SearchAttributes, query
 	}
 }
 
+type seasonSearchFinishedMsg struct {
+	seasons []scraper.SeasonResult
+	err     error
+}
+
+func seasonQueryCmd(ctx context.Context, result scraper.SearchResult) tea.Cmd {
+	return func() tea.Msg {
+		var seasons []scraper.SeasonResult
+
+		err := result.Source.GetSeasons(ctx, &seasons, result)
+
+		return seasonSearchFinishedMsg{seasons: seasons, err: err}
+	}
+}
+
 type episodeSearchFinishedMsg struct {
 	episodes []scraper.EpisodeResult
 	err      error
 }
 
-func episodeQueryCmd(ctx context.Context, result scraper.SearchResult) tea.Cmd {
+func episodeQueryCmd(ctx context.Context, result scraper.SearchResult, season *scraper.SeasonResult) tea.Cmd {
 	return func() tea.Msg {
 		var episodes []scraper.EpisodeResult
 
-		err := result.Source.GetEpisodes(ctx, &episodes, result)
+		err := result.Source.GetEpisodes(ctx, &episodes, result, season)
 
 		if len(episodes) == 0 {
 			episodes = append(episodes, scraper.EpisodeResult{

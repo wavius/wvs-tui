@@ -22,6 +22,21 @@ const (
 	All
 )
 
+// SearchAttributes defines scraping CSS/HTML selectors:
+//
+//		ReadySelector: CSS to wait for before scraping.
+//
+//		Container: CSS for list elements.
+//		- "" SeasonContainerSelector skips season selection.
+//
+//		Class / ClickSelector: CSS for a child inside the container.
+//		- "" targets the container itself.
+//
+//		Attr: HTML attribute to extract (e.g., "href").
+//		- "text" extracts inner text
+//
+//	 AddNumbering: If true, adds numbering to the result name.
+//	  - Some websites do it automatically
 type SearchAttributes struct {
 	Site   string
 	Search string
@@ -31,16 +46,25 @@ type SearchAttributes struct {
 	// Search selectors
 	ResultReadySelector string // css
 	ResultContainer     string // css
-	ResultNameClass     string // css class inside container
-	ResultNameAttr      string // html attribute
-	ResultLinkClass     string // css class inside container
-	ResultLinkAttr      string // html attribute
+	ResultNameClass     string // css
+	ResultNameAttr      string // html attr
+	ResultLinkClass     string // css
+	ResultLinkAttr      string // html attr
+
+	// Season selectors
+	SeasonContainerSelector string // css
+	SeasonClickSelector     string // css
+	SeasonNameClass         string // css
+	SeasonNameAttr          string // html attr
 
 	// Episode selectors
 	EpisodeReadySelector string // css
 	EpisodeContainer     string // css
-	EpisodeNameClass     string // css class inside container
-	EpisodeNameAttr      string // html attribute
+	EpisodeNameClass     string // css
+	EpisodeNameAttr      string // html attr
+
+	// Formatting
+	EpisodeAddNumbering bool
 }
 
 type SearchResult struct {
@@ -63,6 +87,17 @@ func (r SearchResult) Description() string {
 }
 func (r SearchResult) FilterValue() string { return r.Name }
 
+type SeasonResult struct {
+	Name          string
+	Number        int
+	ClickSelector string
+}
+
+// list.Item interface for Bubbletea
+func (s SeasonResult) Title() string       { return s.Name }
+func (s SeasonResult) Description() string { return "" }
+func (s SeasonResult) FilterValue() string { return s.Name }
+
 type EpisodeResult struct {
 	Name          string
 	Number        int
@@ -82,7 +117,10 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 
 	url := s.Site + s.Search + s.Query
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	tabCtx, cancelTab := chromedp.NewContext(ctx)
+	defer cancelTab()
+
+	timeoutCtx, cancel := context.WithTimeout(tabCtx, 15*time.Second)
 	defer cancel()
 
 	var nodes []*cdp.Node
@@ -111,32 +149,98 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 	return nil
 }
 
-func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeResult, result SearchResult) error {
-	if episodes == nil {
-		return fmt.Errorf("episodes pointer cannot be nil")
+func (s SearchAttributes) GetSeasons(ctx context.Context, seasons *[]SeasonResult, result SearchResult) error {
+	if seasons == nil {
+		return fmt.Errorf("seasons pointer cannot be nil")
 	}
 
 	url := result.Link
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	tabCtx, cancelTab := chromedp.NewContext(ctx)
+	defer cancelTab()
+
+	timeoutCtx, cancel := context.WithTimeout(tabCtx, 15*time.Second)
 	defer cancel()
 
 	var nodes []*cdp.Node
 	if err := chromedp.Run(
 		timeoutCtx,
 		chromedp.Navigate(url),
+		chromedp.WaitReady(s.SeasonContainerSelector),
+		chromedp.Nodes(s.SeasonContainerSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
+	); err != nil {
+		return fmt.Errorf("could not find seasons: %w", err)
+	}
+
+	for i, node := range nodes {
+		selector := fmt.Sprintf(`
+			let el = document.querySelectorAll("%s")[%d];
+			if (el && el.tagName && el.tagName.toLowerCase() === 'option') {
+				let sel = el.parentElement;
+				sel.value = el.value;
+				sel.dispatchEvent(new Event('change', { bubbles: true }));
+			} else if (el) {
+				el.click();
+			}
+		`, s.SeasonContainerSelector, i)
+
+		item := SeasonResult{
+			Name:          extractNodeData(timeoutCtx, node, s.SeasonNameClass, s.SeasonNameAttr),
+			Number:        i + 1,
+			ClickSelector: selector,
+		}
+
+		*seasons = append(*seasons, item)
+	}
+	return nil
+}
+
+func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeResult, result SearchResult, season *SeasonResult) error {
+	if episodes == nil {
+		return fmt.Errorf("episodes pointer cannot be nil")
+	}
+
+	url := result.Link
+
+	tabCtx, cancelTab := chromedp.NewContext(ctx)
+	defer cancelTab()
+
+	timeoutCtx, cancel := context.WithTimeout(tabCtx, 15*time.Second)
+	defer cancel()
+
+	var actions []chromedp.Action
+	actions = append(actions, chromedp.Navigate(url))
+
+	if season != nil && season.ClickSelector != "" {
+		actions = append(actions,
+			chromedp.WaitReady(s.SeasonContainerSelector),
+			chromedp.Evaluate(season.ClickSelector, nil),
+			chromedp.Sleep(1*time.Second), // wait for episodes to load after clicking season
+		)
+	}
+
+	var nodes []*cdp.Node
+	actions = append(actions,
 		chromedp.WaitReady(s.EpisodeReadySelector),
 		chromedp.Nodes(s.EpisodeContainer, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
-	); err != nil {
+	)
+
+	if err := chromedp.Run(timeoutCtx, actions...); err != nil {
 		return fmt.Errorf("could not find video: %w", err)
 	}
 
 	for i, node := range nodes {
 
+		name := extractNodeData(timeoutCtx, node, s.EpisodeNameClass, s.EpisodeNameAttr)
+
+		if s.EpisodeAddNumbering {
+			name = fmt.Sprintf("%d - %s", i+1, name)
+		}
+
 		selector := fmt.Sprintf(`document.querySelectorAll("%s")[%d].click()`, s.EpisodeContainer, i)
 
 		item := EpisodeResult{
-			Name:          extractNodeData(timeoutCtx, node, s.EpisodeNameClass, s.EpisodeNameAttr),
+			Name:          name,
 			Number:        i + 1,
 			ClickSelector: selector,
 		}

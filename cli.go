@@ -14,7 +14,7 @@ import (
 // USED FOR DEBUGGING ONLY:
 // CLI is currently unused in favor of the BubbleTea TUI implementation
 
-func promptui_main() {
+func promptui_main(sites []scraper.SearchAttributes) {
 	clear()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -25,8 +25,6 @@ func promptui_main() {
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
-
-	chromedp.Run(ctx)
 
 	var results []scraper.SearchResult
 	var episodes []scraper.EpisodeResult
@@ -46,7 +44,7 @@ func promptui_main() {
 	// Convert raw string to url query
 	query = url.QueryEscape(query)
 
-	for _, site := range Sites {
+	for _, site := range sites {
 		if site.Site == "" {
 			continue
 		}
@@ -94,7 +92,7 @@ func promptui_main() {
 
 	fmt.Printf("\n[DEBUG] You selected:\n    Name: %s\n    Link: %s\n\n", selectedResult.Name, selectedResult.Link)
 
-	err = selectedResult.Source.GetEpisodes(ctx, &episodes, selectedResult)
+	err = selectedResult.Source.GetEpisodes(ctx, &episodes, selectedResult, nil)
 	errorFatal("Episode fetch failed", err)
 
 	if len(episodes) == 0 {
