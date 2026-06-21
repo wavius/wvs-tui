@@ -7,6 +7,14 @@ TARGET = wvs-tui
 all: setup
 	go build -ldflags="-X 'main/scraper.TMDBApiKey=$(API_KEY)'" -o $(BUILD_DIR)/$(TARGET)
 
+# Build for all major platforms
+build-all: setup
+	GOOS=linux GOARCH=amd64 go build -ldflags="-X 'main/scraper.TMDBApiKey=$(API_KEY)'" -o $(BUILD_DIR)/$(TARGET)-linux-amd64
+	GOOS=linux GOARCH=arm64 go build -ldflags="-X 'main/scraper.TMDBApiKey=$(API_KEY)'" -o $(BUILD_DIR)/$(TARGET)-linux-arm64
+	GOOS=windows GOARCH=amd64 go build -ldflags="-X 'main/scraper.TMDBApiKey=$(API_KEY)'" -o $(BUILD_DIR)/$(TARGET)-windows-amd64.exe
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-X 'main/scraper.TMDBApiKey=$(API_KEY)'" -o $(BUILD_DIR)/$(TARGET)-darwin-amd64
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-X 'main/scraper.TMDBApiKey=$(API_KEY)'" -o $(BUILD_DIR)/$(TARGET)-darwin-arm64
+
 # Target to create the directory
 setup:
 	mkdir -p $(BUILD_DIR)
@@ -25,4 +33,4 @@ install: all
 	cp $(BUILD_DIR)/$(TARGET) ~/.local/bin/wvs
 	@echo "Installed wvs to ~/.local/bin/wvs. Ensure ~/.local/bin is in your PATH."
 
-.PHONY: all setup clean run install
+.PHONY: all build-all setup clean run install
