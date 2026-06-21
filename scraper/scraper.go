@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -113,6 +114,27 @@ func (r EpisodeResult) Title() string       { return r.Name }
 func (r EpisodeResult) Description() string { return r.Link }
 func (r EpisodeResult) FilterValue() string { return r.Name }
 
+func (s SearchAttributes) IsUp(ctx context.Context) bool {
+	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(timeoutCtx, "GET", s.Site, nil)
+	if err != nil {
+		return false
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	// 5xx errors usually mean the server/host is physically down or offline (Cloudflare 521/522)
+	return resp.StatusCode < 500
+}
+
 func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchResult) error {
 	if results == nil {
 		return fmt.Errorf("results pointer cannot be nil")
@@ -142,11 +164,15 @@ func (s SearchAttributes) SearchForQuery(ctx context.Context, results *[]SearchR
 			date = extractNodeData(timeoutCtx, node, s.ResultDateClass, s.ResultDateAttr)
 		}
 
+		// if episode link is absolute, make it relative
+		rawLink := extractNodeData(timeoutCtx, node, s.ResultLinkClass, s.ResultLinkAttr)
+		rawLink = strings.TrimPrefix(rawLink, s.Site)
+
 		item := SearchResult{
 			Name:   extractNodeData(timeoutCtx, node, s.ResultNameClass, s.ResultNameAttr),
 			Number: i + 1,
 			Date:   date,
-			Link:   s.Site + extractNodeData(timeoutCtx, node, s.ResultLinkClass, s.ResultLinkAttr),
+			Link:   s.Site + rawLink,
 			Source: s,
 		}
 
@@ -371,12 +397,12 @@ func (s SearchAttributes) PlayVideo(videoURL string) *exec.Cmd {
 
 				if len(headerArgs) > 0 {
 					headerArg := "--http-header-fields=" + strings.Join(headerArgs, ",")
-					return exec.Command("mpv", "--hwdec=auto", "--profile=fast", "--quiet", headerArg, videoURL)
+					return exec.Command("mpv", "--hwdec=auto", "--quiet", headerArg, videoURL)
 				}
 			}
 		}
 	}
 
 	// Default run mpv
-	return exec.Command("mpv", "--hwdec=auto", "--profile=fast", "--quiet", videoURL)
+	return exec.Command("mpv", "--hwdec=auto", "--quiet", videoURL)
 }

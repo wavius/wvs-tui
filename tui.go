@@ -391,6 +391,11 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SearchAttributes, query
 			if site.Site == "" {
 				continue
 			}
+
+			if !site.IsUp(ctx) {
+				continue
+			}
+
 			if site.Type == scraper.Anime {
 				if !scraper.FoundAnime(ctx, query) {
 					continue
@@ -404,8 +409,9 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SearchAttributes, query
 			site.Query = query
 			var siteResults []scraper.SearchResult
 			err := site.SearchForQuery(ctx, &siteResults)
-			if err == nil {
+			if err == nil && len(siteResults) > 0 {
 				results = append(results, siteResults...)
+				break
 			}
 		}
 

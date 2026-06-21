@@ -14,7 +14,7 @@ import (
 // USED FOR DEBUGGING ONLY:
 // CLI is currently unused in favor of the BubbleTea TUI implementation
 
-func promptui_main(sites []scraper.SearchAttributes) {
+func promptui_main(sites []scraper.SearchAttributes, initialQuery string) {
 	clear()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -38,8 +38,12 @@ func promptui_main(sites []scraper.SearchAttributes) {
 		},
 	}
 
-	query, err := searchPrompt.Run()
-	errorFatal("Search prompt failed", err)
+	query := initialQuery
+	if query == "" {
+		var err error
+		query, err = searchPrompt.Run()
+		errorFatal("Search prompt failed", err)
+	}
 
 	// Convert raw string to url query
 	query = url.QueryEscape(query)
@@ -48,6 +52,11 @@ func promptui_main(sites []scraper.SearchAttributes) {
 		if site.Site == "" {
 			continue
 		}
+
+		if !site.IsUp(ctx) {
+			continue
+		}
+
 		if site.Type == scraper.Anime {
 			if !scraper.FoundAnime(ctx, query) {
 				continue
@@ -59,7 +68,10 @@ func promptui_main(sites []scraper.SearchAttributes) {
 		}
 
 		site.Query = query
-		_ = site.SearchForQuery(ctx, &results)
+		err := site.SearchForQuery(ctx, &results)
+		if err == nil && len(results) > 0 {
+			break
+		}
 	}
 
 	if len(results) == 0 {
@@ -92,7 +104,35 @@ func promptui_main(sites []scraper.SearchAttributes) {
 
 	fmt.Printf("\n[DEBUG] You selected:\n    Name: %s\n    Link: %s\n\n", selectedResult.Name, selectedResult.Link)
 
-	err = selectedResult.Source.GetEpisodes(ctx, &episodes, selectedResult, nil)
+	var seasons []scraper.SeasonResult
+	var selectedSeason *scraper.SeasonResult
+
+	if selectedResult.Source.SeasonContainerSelector != "" {
+		err = selectedResult.Source.GetSeasons(ctx, &seasons, selectedResult)
+		if err == nil && len(seasons) > 0 {
+			label = fmt.Sprintf("Found %d seasons", len(seasons))
+
+			prompt = promptui.Select{
+				Label: label,
+				Items: seasons,
+				Templates: &promptui.SelectTemplates{
+					Active:   `> {{ .Name | cyan }}`,
+					Inactive: `  {{ .Name }}`,
+					Selected: `{{ "✔" | green }} {{ .Name | bold }}`,
+				},
+				Size:     15,
+				HideHelp: true,
+			}
+
+			seasonIndex, _, err := prompt.Run()
+			errorFatal("Season prompt failed", err)
+			selectedSeason = &seasons[seasonIndex]
+
+			fmt.Printf("\n[DEBUG] You selected Season:\n    Name: %s\n\n", selectedSeason.Name)
+		}
+	}
+
+	err = selectedResult.Source.GetEpisodes(ctx, &episodes, selectedResult, selectedSeason)
 	errorFatal("Episode fetch failed", err)
 
 	if len(episodes) == 0 {
