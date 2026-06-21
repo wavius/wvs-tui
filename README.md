@@ -37,9 +37,13 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
 
 3. **Usage:**
    ```bash
-   wvs                   # Interactive mode
-   wvs Attack on Titan   # Direct search
+   wvs                  # Interactive mode
+                        # or
+   wvs Attack on Titan  # Direct search
    ```
+- **Enter** to confirm
+- **Backspace** to go back
+- **Esc** to quit
 
 ## Notes
 - Posters are rendered using Halfblocks 
@@ -47,4 +51,4 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
 ## TODO
 - Sync watched history with Anilist/TMDB
 - Video downloads
-- Flags: Language (default En), Quality, Sub/Dub (defualt Sub), Source
+- Flags: Language (default En), Quality, Sub/Dub (default Sub), Source
