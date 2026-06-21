@@ -41,7 +41,10 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
    wvs Attack on Titan   # Direct search
    ```
 
+## Notes
+- Posters are rendered using Halfblocks 
+
 ## TODO
 - Sync watched history with Anilist/TMDB
 - Video downloads
-- Flags: Language (default En), Quality, Sub/Dub (defualt Sub)
+- Flags: Language (default En), Quality, Sub/Dub (defualt Sub), Source

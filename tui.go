@@ -363,6 +363,10 @@ func (m tuiModel) View() string {
 func bubbletea_main(sites []scraper.SearchAttributes, initialQuery string) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("disable-site-isolation-trials", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-software-rasterizer", true),
+		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 	)
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancelAlloc()
@@ -487,10 +491,15 @@ func episodeQueryCmd(ctx context.Context, result scraper.SearchResult, season *s
 		err := result.Source.GetEpisodes(ctx, &episodes, result, season)
 
 		if len(episodes) == 0 {
+			clickSel := ""
+			if result.Source.MovieContainer != "" {
+				clickSel = fmt.Sprintf(`document.querySelectorAll("%s")[0].click()`, result.Source.MovieContainer)
+			}
 			episodes = append(episodes, scraper.EpisodeResult{
 				Name:          "Movie",
 				Number:        1,
-				ClickSelector: "",
+				ClickSelector: clickSel,
+				Container:     result.Source.MovieContainer,
 			})
 		}
 

@@ -19,6 +19,10 @@ func promptui_main(sites []scraper.SearchAttributes, initialQuery string) {
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("disable-site-isolation-trials", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-software-rasterizer", true),
+		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 	)
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancelAlloc()
@@ -136,10 +140,16 @@ func promptui_main(sites []scraper.SearchAttributes, initialQuery string) {
 	errorFatal("Episode fetch failed", err)
 
 	if len(episodes) == 0 {
+		clickSel := ""
+		if selectedResult.Source.MovieContainer != "" {
+			clickSel = fmt.Sprintf(`document.querySelectorAll("%s")[0].click()`, selectedResult.Source.MovieContainer)
+		}
+
 		episodes = append(episodes, scraper.EpisodeResult{
 			Name:          "Movie",
 			Number:        1,
-			ClickSelector: "",
+			ClickSelector: clickSel,
+			Container:     selectedResult.Source.MovieContainer,
 		})
 		label = "Found 1 movie"
 	} else {

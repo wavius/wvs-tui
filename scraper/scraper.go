@@ -32,12 +32,14 @@ const (
 //
 //		Class / ClickSelector: CSS for a child inside the container.
 //		- "" targets the container itself.
+//		- "" MovieContainer defaults to EpisodeContainer
 //
 //		Attr: HTML attribute to extract (e.g., "href").
 //		- "text" extracts inner text
 //
 //	 AddNumbering: If true, adds numbering to the result name.
 //	  - Some websites do it automatically
+
 type SearchAttributes struct {
 	Site   string
 	Search string
@@ -61,10 +63,11 @@ type SearchAttributes struct {
 	SeasonNameAttr          string // html attr
 
 	// Episode selectors
-	EpisodeReadySelector string // css
-	EpisodeContainer     string // css
-	EpisodeNameClass     string // css
-	EpisodeNameAttr      string // html attr
+	MediaReadySelector string // css
+	EpisodeContainer   string // css
+	EpisodeNameClass   string // css
+	EpisodeNameAttr    string // html attr
+	MovieContainer     string // css
 
 	// Formatting
 	EpisodeAddNumbering bool
@@ -107,6 +110,7 @@ type EpisodeResult struct {
 	Number        int
 	Link          string
 	ClickSelector string
+	Container     string
 }
 
 // list.Item interface for Bubbletea
@@ -200,7 +204,7 @@ func (s SearchAttributes) GetSeasons(ctx context.Context, seasons *[]SeasonResul
 	if err := chromedp.Run(
 		timeoutCtx,
 		chromedp.Navigate(url),
-		chromedp.WaitReady(s.EpisodeReadySelector),
+		chromedp.WaitReady(s.MediaReadySelector),
 		chromedp.Nodes(s.SeasonContainerSelector, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	); err != nil {
 		return fmt.Errorf("could not find seasons: %w", err)
@@ -253,30 +257,40 @@ func (s SearchAttributes) GetEpisodes(ctx context.Context, episodes *[]EpisodeRe
 		)
 	}
 
+	containerSel := s.EpisodeContainer
+	if season == nil && s.MovieContainer != "" {
+		containerSel = s.MovieContainer
+	}
+
 	var nodes []*cdp.Node
 	actions = append(actions,
-		chromedp.WaitReady(s.EpisodeReadySelector),
-		chromedp.Nodes(s.EpisodeContainer, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
+		chromedp.WaitReady(s.MediaReadySelector),
+		chromedp.Nodes(containerSel, &nodes, chromedp.ByQueryAll, chromedp.AtLeast(0)),
 	)
 
 	if err := chromedp.Run(timeoutCtx, actions...); err != nil {
-		return fmt.Errorf("could not find video: %w", err)
+		// If it times out waiting for episodes, we safely ignore the error.
+		// This allows the caller (cli/tui) to fall back to the Movie flow!
+		return nil
 	}
 
 	for i, node := range nodes {
 
 		name := extractNodeData(timeoutCtx, node, s.EpisodeNameClass, s.EpisodeNameAttr)
 
-		if s.EpisodeAddNumbering {
+		if season == nil && s.MovieContainer != "" {
+			name = "Movie"
+		} else if s.EpisodeAddNumbering {
 			name = fmt.Sprintf("%d - %s", i+1, name)
 		}
 
-		selector := fmt.Sprintf(`document.querySelectorAll("%s")[%d].click()`, s.EpisodeContainer, i)
+		selector := fmt.Sprintf(`document.querySelectorAll("%s")[%d].click()`, containerSel, i)
 
 		item := EpisodeResult{
 			Name:          name,
 			Number:        i + 1,
 			ClickSelector: selector,
+			Container:     containerSel,
 		}
 
 		*episodes = append(*episodes, item)
@@ -308,12 +322,16 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 	}
 
 	if episode.ClickSelector != "" {
+		waitSel := s.MediaReadySelector
+		if episode.Container != "" {
+			waitSel = episode.Container
+		}
 		actions = append(actions,
-			chromedp.WaitReady(s.EpisodeContainer),
+			chromedp.WaitReady(waitSel),
 			chromedp.Evaluate(episode.ClickSelector, nil),
 		)
 	} else {
-		actions = append(actions, chromedp.WaitReady(s.EpisodeReadySelector))
+		actions = append(actions, chromedp.WaitReady(s.MediaReadySelector))
 	}
 
 	actions = append(actions, chromedp.Sleep(3*time.Second))
@@ -397,12 +415,12 @@ func (s SearchAttributes) PlayVideo(videoURL string) *exec.Cmd {
 
 				if len(headerArgs) > 0 {
 					headerArg := "--http-header-fields=" + strings.Join(headerArgs, ",")
-					return exec.Command("mpv", "--hwdec=auto", "--quiet", headerArg, videoURL)
+					return exec.Command("mpv", "--hwdec=auto", "--quiet", "--ytdl-format=bestvideo+bestaudio/best", "--hls-bitrate=max", headerArg, videoURL)
 				}
 			}
 		}
 	}
 
 	// Default run mpv
-	return exec.Command("mpv", "--hwdec=auto", "--quiet", videoURL)
+	return exec.Command("mpv", "--hwdec=auto", "--quiet", "--ytdl-format=bestvideo+bestaudio/best", "--hls-bitrate=max", videoURL)
 }

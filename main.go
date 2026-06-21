@@ -31,10 +31,10 @@ var miruro scraper.SearchAttributes = scraper.SearchAttributes{
 	SeasonNameAttr:          "",
 
 	// Episode attributes
-	EpisodeReadySelector: ".player video",
-	EpisodeContainer:     "._root_p7i3w_1",
-	EpisodeNameClass:     "",
-	EpisodeNameAttr:      "title",
+	MediaReadySelector: ".player video",
+	EpisodeContainer:   "._root_p7i3w_1",
+	EpisodeNameClass:   "",
+	EpisodeNameAttr:    "title",
 
 	// Formatting
 	EpisodeAddNumbering: false,
@@ -63,10 +63,11 @@ var streamvaults scraper.SearchAttributes = scraper.SearchAttributes{
 	SeasonNameAttr:          "text",
 
 	// Episode attributes
-	EpisodeReadySelector: ".text-2xl",
-	EpisodeContainer:     ".flex.gap-3.p-3.rounded-xl",
-	EpisodeNameClass:     ".text-sm.font-semibold.line-clamp-1",
-	EpisodeNameAttr:      "text",
+	MediaReadySelector: ".text-2xl.font-black",
+	EpisodeContainer:   ".flex.gap-3.p-3.rounded-xl",
+	EpisodeNameClass:   ".text-sm.font-semibold.line-clamp-1",
+	EpisodeNameAttr:    "text",
+	MovieContainer:     "",
 
 	// Formatting
 	EpisodeAddNumbering: true,
@@ -95,16 +96,17 @@ var gaiaflix scraper.SearchAttributes = scraper.SearchAttributes{
 	SeasonNameAttr:          "text",
 
 	// Episode attributes
-	EpisodeReadySelector: ".bg-background.p-4.rounded-xl",
-	EpisodeContainer:     ".bg-background.p-4.rounded-xl",
-	EpisodeNameClass:     ".font-semibold.text-sm.truncate.block",
-	EpisodeNameAttr:      "text",
+	MediaReadySelector: ".text-lg",
+	EpisodeContainer:   ".bg-background.p-4.rounded-xl",
+	EpisodeNameClass:   ".font-semibold.text-sm.truncate.block",
+	EpisodeNameAttr:    "text",
+	MovieContainer:     ".bg-theme.text-theme-foreground.rounded-full.font-bold",
 
 	// Formatting
 	EpisodeAddNumbering: true,
 }
 
-var Sites = []scraper.SearchAttributes{ /*miruro,*/ streamvaults, gaiaflix}
+var Sites = []scraper.SearchAttributes{ /*miruro,*/ gaiaflix, streamvaults}
 
 func main() {
 	var query string
