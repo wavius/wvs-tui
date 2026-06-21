@@ -311,7 +311,9 @@ func (s SearchAttributes) GetVideo(ctx context.Context, episode EpisodeResult, r
 		// Check if the event type contains ".m3u8" or ".mp4"
 		case *network.EventRequestWillBeSent:
 			if strings.Contains(e.Request.URL, ".m3u8") || strings.Contains(e.Request.URL, ".mp4") {
-				streamURL = e.Request.URL
+				if streamURL == "" {
+					streamURL = e.Request.URL
+				}
 			}
 		}
 	})
