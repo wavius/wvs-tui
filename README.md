@@ -49,6 +49,6 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
 - Posters are rendered using Halfblocks 
 
 ## TODO
-- Sync watched history with Anilist/TMDB
+- Sync watch history with Anilist/TMDB
 - Video downloads
 - Flags: Language (default En), Quality, Sub/Dub (default Sub), Source

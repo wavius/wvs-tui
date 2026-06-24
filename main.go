@@ -7,106 +7,46 @@ import (
 	"main/scraper"
 )
 
-// Unused
-var miruro scraper.SearchAttributes = scraper.SearchAttributes{
-	Site:   "https://www.miruro.to",
-	Search: "/search?query=",
-	Query:  "",
-	Type:   scraper.Anime,
-
-	// Result attributes
-	ResultReadySelector: "._styledCardWrapper_eylnt_1",
-	ResultContainer:     "._styledCardWrapper_eylnt_1",
-	ResultNameClass:     "",
-	ResultNameAttr:      "title",
-	ResultLinkClass:     "",
-	ResultLinkAttr:      "href",
-	ResultDateClass:     "",
-	ResultDateAttr:      "",
-
-	// Season attributes
-	SeasonContainerSelector: "",
-	SeasonClickSelector:     "",
-	SeasonNameClass:         "",
-	SeasonNameAttr:          "",
-
-	// Episode attributes
-	MediaReadySelector: ".player video",
-	EpisodeContainer:   "._root_p7i3w_1",
-	EpisodeNameClass:   "",
-	EpisodeNameAttr:    "title",
-
-	// Formatting
-	EpisodeAddNumbering: false,
-}
-
-var streamvaults scraper.SearchAttributes = scraper.SearchAttributes{
+var streamvaults = scraper.SiteConfig{
 	Site:   "https://streamvaults.ru",
 	Search: "/search?q=",
-	Query:  "",
 	Type:   scraper.All,
 
-	// Result attributes
-	ResultReadySelector: ".text-3xl",
-	ResultContainer:     ".group.block.w-full",
-	ResultNameClass:     ".text-sm.font-semibold",
-	ResultNameAttr:      "text",
-	ResultLinkClass:     "",
-	ResultLinkAttr:      "href",
-	ResultDateClass:     ".bg-transparent",
-	ResultDateAttr:      "text",
-
-	// Season attributes
-	SeasonContainerSelector: ".ml-auto.bg-zinc-800.border option",
-	SeasonClickSelector:     "",
-	SeasonNameClass:         "",
-	SeasonNameAttr:          "text",
-
-	// Episode attributes
-	MediaReadySelector: ".text-2xl.font-black",
-	EpisodeContainer:   ".flex.gap-3.p-3.rounded-xl",
-	EpisodeNameClass:   ".text-sm.font-semibold.line-clamp-1",
-	EpisodeNameAttr:    "text",
-	MovieContainer:     "",
-
-	// Formatting
-	EpisodeAddNumbering: true,
+	ResultReadySelector: "",
+	ResultClickSelector: "",
+	SeasonSelector:      "",
+	EpisodeSelector:     "",
+	VideoReadySelector:  "",
+	MovieSelector:       "",
 }
 
-var gaiaflix scraper.SearchAttributes = scraper.SearchAttributes{
+var allyoucanwatch = scraper.SiteConfig{
+	Site:   "https://allyoucanwatch.net",
+	Search: "/search?q=",
+	Type:   scraper.All,
+
+	ResultReadySelector: "",
+	ResultClickSelector: "",
+	SeasonSelector:      "",
+	EpisodeSelector:     "",
+	VideoReadySelector:  "",
+	MovieSelector:       "",
+}
+
+var gaiaflix = scraper.SiteConfig{
 	Site:   "https://gaiaflix.live",
 	Search: "/search?q=",
-	Query:  "",
 	Type:   scraper.All,
 
-	// Result attributes
-	ResultReadySelector: ".group",
-	ResultContainer:     ".group.relative.bg-card.rounded-2xl",
-	ResultNameClass:     ".font-bold.truncate.text-sm",
-	ResultNameAttr:      "text",
-	ResultLinkClass:     "",
-	ResultLinkAttr:      "href",
-	ResultDateClass:     ".flex.justify-between.items-center",
-	ResultDateAttr:      "text",
-
-	// Season attributes
-	SeasonContainerSelector: ".px-6.rounded-2xl.font-semibold",
-	SeasonClickSelector:     "",
-	SeasonNameClass:         "",
-	SeasonNameAttr:          "text",
-
-	// Episode attributes
-	MediaReadySelector: ".text-lg",
-	EpisodeContainer:   ".bg-background.p-4.rounded-xl",
-	EpisodeNameClass:   ".font-semibold.text-sm.truncate.block",
-	EpisodeNameAttr:    "text",
-	MovieContainer:     ".bg-theme.text-theme-foreground.rounded-full.font-bold",
-
-	// Formatting
-	EpisodeAddNumbering: true,
+	ResultReadySelector: "",
+	ResultClickSelector: "",
+	SeasonSelector:      "",
+	EpisodeSelector:     "",
+	VideoReadySelector:  "",
+	MovieSelector:       "",
 }
 
-var Sites = []scraper.SearchAttributes{ /*miruro,*/ gaiaflix, streamvaults}
+var Sites = []scraper.SiteConfig{streamvaults, allyoucanwatch, gaiaflix}
 
 func main() {
 	var query string
@@ -114,9 +54,5 @@ func main() {
 		query = strings.Join(os.Args[1:], " ")
 	}
 
-	// tui
 	bubbletea_main(Sites, query)
-
-	// cli (debug)
-	// promptui_main(Sites, query)
 }

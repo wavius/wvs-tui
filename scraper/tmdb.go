@@ -7,121 +7,178 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 )
 
-type TMDBResponse struct {
-	Results []struct {
-		Overview     string `json:"overview"`
-		PosterPath   string `json:"poster_path"`
-		ReleaseDate  string `json:"release_date"`
-		FirstAirDate string `json:"first_air_date"`
-	} `json:"results"`
+var TMDBApiKey string // Injected at compile time via ldflags
+
+func getAPIKey() string {
+	if TMDBApiKey != "" {
+		return TMDBApiKey
+	}
+	return os.Getenv("TMDB_API_KEY")
 }
 
-var TMDBApiKey string // Can be injected at compile time via ldflags
-
-func FoundTMDB(ctx context.Context, title string) bool {
-	apiKey := TMDBApiKey
+func tmdbGet(ctx context.Context, path string, target interface{}) error {
+	apiKey := getAPIKey()
 	if apiKey == "" {
-		apiKey = os.Getenv("TMDB_API_KEY")
+		return fmt.Errorf("TMDB API key not provided")
 	}
 
-	if apiKey == "" {
-		return false
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
 	}
+	reqURL := fmt.Sprintf("https://api.themoviedb.org/3%s%sapi_key=%s", path, sep, apiKey)
 
-	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/multi?api_key=%s&query=%s", apiKey, url.QueryEscape(title))
-
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
-		return false
+		return err
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false
+		return fmt.Errorf("TMDB API returned status: %d", resp.StatusCode)
 	}
 
-	var apiResp TMDBResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return false
-	}
-
-	return len(apiResp.Results) > 0
+	return json.NewDecoder(resp.Body).Decode(target)
 }
 
-// Queries the TMDB API to get a media's description and cover image
-func FetchTMDBInfo(ctx context.Context, title string, year string) (string, string, error) {
-	apiKey := TMDBApiKey
-	if apiKey == "" {
-		apiKey = os.Getenv("TMDB_API_KEY")
+// --- Response types ---
+
+type TMDBMultiResult struct {
+	ID           int    `json:"id"`
+	MediaType    string `json:"media_type"` // "tv" or "movie"
+	Name         string `json:"name"`       // TV shows
+	Title        string `json:"title"`      // Movies
+	Overview     string `json:"overview"`
+	PosterPath   string `json:"poster_path"`
+	ReleaseDate  string `json:"release_date"`
+	FirstAirDate string `json:"first_air_date"`
+}
+
+func (r TMDBMultiResult) DisplayName() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.Title
+}
+
+func (r TMDBMultiResult) DisplayDate() string {
+	dateStr := ""
+	if r.FirstAirDate != "" {
+		dateStr = r.FirstAirDate
+	} else if r.ReleaseDate != "" {
+		dateStr = r.ReleaseDate
 	}
 
-	if apiKey == "" {
-		return "", "", fmt.Errorf("TMDB API key not provided at compile time or in environment")
+	year := "Unknown Year"
+	if len(dateStr) >= 4 {
+		year = dateStr[:4]
+	} else if dateStr != "" {
+		year = dateStr
 	}
 
-	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/multi?api_key=%s&query=%s", apiKey, url.QueryEscape(title))
-
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-	if err != nil {
-		return "", "", err
+	mType := "Unknown"
+	if r.MediaType == "movie" {
+		mType = "Film"
+	} else if r.MediaType == "tv" {
+		mType = "Show"
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
+	return fmt.Sprintf("%s • %s", year, mType)
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("TMDB API returned status: %d", resp.StatusCode)
+func (r TMDBMultiResult) PosterURL() string {
+	if r.PosterPath != "" {
+		return "https://image.tmdb.org/t/p/w500" + r.PosterPath
+	}
+	return ""
+}
+
+type TMDBSeason struct {
+	Name         string `json:"name"`
+	SeasonNumber int    `json:"season_number"`
+	EpisodeCount int    `json:"episode_count"`
+}
+
+type TMDBEpisode struct {
+	Name          string `json:"name"`
+	EpisodeNumber int    `json:"episode_number"`
+	AirDate       string `json:"air_date"`
+	Overview      string `json:"overview"`
+	StillPath     string `json:"still_path"`
+}
+
+func (e TMDBEpisode) StillURL() string {
+	if e.StillPath != "" {
+		return "https://image.tmdb.org/t/p/w500" + e.StillPath
+	}
+	return ""
+}
+
+// --- API functions ---
+
+func SearchTMDB(ctx context.Context, query string) ([]TMDBMultiResult, error) {
+	var resp struct {
+		Results []TMDBMultiResult `json:"results"`
 	}
 
-	var apiResp TMDBResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return "", "", err
+	path := fmt.Sprintf("/search/multi?query=%s", url.QueryEscape(query))
+	if err := tmdbGet(ctx, path, &resp); err != nil {
+		return nil, err
 	}
 
-	if len(apiResp.Results) == 0 {
-		return "", "", fmt.Errorf("no results found")
-	}
-
-	// Extract 4-digit year from the scraped year string
-	var parsedYear string
-	re := regexp.MustCompile(`\b(19|20)\d{2}\b`)
-	matches := re.FindStringSubmatch(year)
-	if len(matches) > 0 {
-		parsedYear = matches[0]
-	}
-
-	bestResultIndex := 0
-	if parsedYear != "" {
-		for i, res := range apiResp.Results {
-			if strings.HasPrefix(res.ReleaseDate, parsedYear) || strings.HasPrefix(res.FirstAirDate, parsedYear) {
-				bestResultIndex = i
-				break
-			}
+	// Filter to only tv and movie results
+	var filtered []TMDBMultiResult
+	for _, r := range resp.Results {
+		switch r.MediaType {
+		case "tv", "movie":
+			filtered = append(filtered, r)
 		}
 	}
 
-	desc := apiResp.Results[bestResultIndex].Overview
-	var imgURL string
-	if apiResp.Results[bestResultIndex].PosterPath != "" {
-		imgURL = "https://image.tmdb.org/t/p/w500" + apiResp.Results[bestResultIndex].PosterPath
+	return filtered, nil
+}
+
+func GetTMDBSeasons(ctx context.Context, showID int) ([]TMDBSeason, error) {
+	var resp struct {
+		Seasons []TMDBSeason `json:"seasons"`
 	}
 
-	// Clean up excess whitespace
-	desc = strings.TrimSpace(desc)
+	path := fmt.Sprintf("/tv/%d", showID)
+	if err := tmdbGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
 
-	return desc, imgURL, nil
+	// Filter out "Specials" (season 0) if there are regular seasons
+	var filtered []TMDBSeason
+	for _, s := range resp.Seasons {
+		if s.SeasonNumber > 0 {
+			filtered = append(filtered, s)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return resp.Seasons, nil
+	}
+	return filtered, nil
+}
+
+func GetTMDBEpisodes(ctx context.Context, showID int, seasonNumber int) ([]TMDBEpisode, error) {
+	var resp struct {
+		Episodes []TMDBEpisode `json:"episodes"`
+	}
+
+	path := fmt.Sprintf("/tv/%d/season/%d", showID, seasonNumber)
+	if err := tmdbGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+
+	return resp.Episodes, nil
 }
