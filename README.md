@@ -38,20 +38,20 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
 ## Usage
 
 ```bash
-wvs <query> [flags]
+wvs [query] [flags]
 ```
 
 ### Commands
-| Command       | Action                                     |
-| ------------- | ------------------------------------------ |
-| `wvs`         | Launch interactive search mode             |
-| `wvs <query>` | Direct search for a specific show or movie |
+```bash
+wvs         # Launch interactive search mode
+wvs <query> # Direct search for a specific show or movie
+```
 
 ### Flags
-| Flag                      | Action                                  |
-| ------------------------- | --------------------------------------- |
-| `-h`, `-help`, `--help`   | List all commands and flags             |
-| `-s`                      | List available sources and their status |
+```bash
+wvs -h      # List all commands and flags
+wvs -s      # List available sources and their status
+```
 
 ### Controls
 | Key                      | Action                         |
