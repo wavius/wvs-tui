@@ -2,10 +2,8 @@ package scraper
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -23,21 +21,17 @@ const (
 	All
 )
 
-// Config to navigate and extract video stream from a site
 type SiteConfig struct {
-	Site   string
-	Search string
-	Type   MediaType
+	Name             string
+	Site             string
+	Type             MediaType
+	MovieURLTemplate string
+	TVURLTemplate    string
 
-	ResultReadySelector string // CSS to wait for after searching
-	ResultClickSelector string // CSS for the first search result to click
-	SeasonSelector      string // CSS for season buttons/dropdown
-	EpisodeSelector     string // CSS for episode items
-	VideoReadySelector  string // CSS to wait for before extracting video
-	MovieSelector       string // CSS for movie play button (no episodes)
+	VideoReadySelector string
+	PlayButtonSelector string
 }
 
-// TMDB search result
 type SearchResult struct {
 	Name      string
 	Number    int
@@ -46,8 +40,7 @@ type SearchResult struct {
 	ImgURL    string
 	RawImg    *termimg.Image
 	TMDBID    int
-	MediaType string // "tv" or "movie"
-	Site      SiteConfig
+	MediaType string
 }
 
 func (r SearchResult) Title() string { return r.Name }
@@ -59,7 +52,6 @@ func (r SearchResult) Description() string {
 }
 func (r SearchResult) FilterValue() string { return r.Name }
 
-// TMDB season
 type SeasonResult struct {
 	Name         string
 	Number       int
@@ -71,7 +63,6 @@ func (s SeasonResult) Title() string       { return s.Name }
 func (s SeasonResult) Description() string { return fmt.Sprintf("%d episodes", s.EpisodeCount) }
 func (s SeasonResult) FilterValue() string { return s.Name }
 
-// TMDB episode
 type EpisodeResult struct {
 	Name          string
 	Number        int
@@ -105,136 +96,119 @@ func (s SiteConfig) IsUp(ctx context.Context) bool {
 	return resp.StatusCode < 500
 }
 
-// Navigates the streaming site via chromedp and extracts the video stream URL
-func (s SiteConfig) GetVideo(ctx context.Context, showName string, seasonNum int, episodeNum int, isMovie bool) (string, error) {
+func (s SiteConfig) GetVideo(ctx context.Context, tmdbID, seasonNum, episodeNum int, isMovie bool) (string, map[string]string, error) {
 	var streamURL string
+	headers := make(map[string]string)
 
 	tabCtx, cancelTab := chromedp.NewContext(ctx)
 	defer cancelTab()
 
 	chromedp.ListenTarget(tabCtx, func(ev any) {
-		switch e := ev.(type) {
-		case *network.EventRequestWillBeSent:
-			if strings.Contains(e.Request.URL, ".m3u8") || strings.Contains(e.Request.URL, ".mp4") {
-				if streamURL == "" {
-					streamURL = e.Request.URL
+		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
+			u := e.Request.URL
+			if streamURL == "" && (strings.Contains(u, ".m3u8") || strings.Contains(u, ".mp4")) {
+				streamURL = u
+				for k, v := range e.Request.Headers {
+					if str, ok := v.(string); ok {
+						headers[k] = str
+					}
+				}
+				if headers["Referer"] == "" && headers["referer"] == "" {
+					headers["Referer"] = e.DocumentURL
 				}
 			}
 		}
 	})
 
-	searchURL := s.Site + s.Search + url.QueryEscape(showName)
+	var playerURL string
+	if isMovie {
+		if s.MovieURLTemplate != "" {
+			playerURL = fmt.Sprintf(s.MovieURLTemplate, s.Site, tmdbID)
+		} else {
+			playerURL = fmt.Sprintf("%s/player/movie/%d", s.Site, tmdbID)
+		}
+	} else {
+		if s.TVURLTemplate != "" {
+			playerURL = fmt.Sprintf(s.TVURLTemplate, s.Site, tmdbID, seasonNum, episodeNum)
+		} else {
+			playerURL = fmt.Sprintf("%s/player/tv/%d/%d/%d", s.Site, tmdbID, seasonNum, episodeNum)
+		}
+	}
 
 	actions := []chromedp.Action{
 		network.Enable(),
-		chromedp.Navigate(searchURL),
+		chromedp.Navigate(playerURL),
 	}
 
-	// Wait for results and click the first match
-	if s.ResultReadySelector != "" {
-		actions = append(actions, chromedp.WaitReady(s.ResultReadySelector))
-	}
-	if s.ResultClickSelector != "" {
-		actions = append(actions, chromedp.Click(s.ResultClickSelector, chromedp.ByQuery))
-	}
-
-	// Wait for video page to load
 	if s.VideoReadySelector != "" {
-		actions = append(actions, chromedp.WaitReady(s.VideoReadySelector))
+		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+			readyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			_ = chromedp.Run(readyCtx, chromedp.WaitReady(s.VideoReadySelector, chromedp.ByQuery))
+			return nil
+		}))
 	}
-
-	if isMovie {
-		if s.MovieSelector != "" {
-			actions = append(actions, chromedp.Click(s.MovieSelector, chromedp.ByQuery))
-		}
-	} else {
-		// Select the correct season
-		if s.SeasonSelector != "" && seasonNum > 0 {
-			seasonJS := fmt.Sprintf(`
-				let items = document.querySelectorAll("%s");
-				if (items[%d]) {
-					let el = items[%d];
-					if (el.tagName && el.tagName.toLowerCase() === 'option') {
-						let sel = el.parentElement;
-						sel.value = el.value;
-						sel.dispatchEvent(new Event('change', { bubbles: true }));
-					} else {
-						el.click();
-					}
-				}
-			`, s.SeasonSelector, seasonNum-1, seasonNum-1)
-			actions = append(actions,
-				chromedp.Evaluate(seasonJS, nil),
-				chromedp.Sleep(1*time.Second),
+	if s.PlayButtonSelector != "" {
+		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+			clickCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			err := chromedp.Run(clickCtx,
+				chromedp.WaitReady(s.PlayButtonSelector, chromedp.ByQuery),
+				chromedp.Click(s.PlayButtonSelector, chromedp.ByQuery),
 			)
-		}
-
-		// Click the correct episode
-		if s.EpisodeSelector != "" && episodeNum > 0 {
-			episodeJS := fmt.Sprintf(`
-				let eps = document.querySelectorAll("%s");
-				if (eps[%d]) { eps[%d].click(); }
-			`, s.EpisodeSelector, episodeNum-1, episodeNum-1)
-			actions = append(actions, chromedp.Evaluate(episodeJS, nil))
-		}
+			if err != nil {
+				// Click center of screen to trigger autoplay if button fails
+				_ = chromedp.Run(ctx, chromedp.MouseClickXY(400, 300))
+			}
+			return nil
+		}))
 	}
 
-	actions = append(actions, chromedp.Sleep(3*time.Second))
+	actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+		for range 30 {
+			if streamURL != "" {
+				return nil
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		return nil
+	}))
 
-	timeoutCtx, cancel := context.WithTimeout(tabCtx, 20*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(tabCtx, 30*time.Second)
 	defer cancel()
 
 	if err := chromedp.Run(timeoutCtx, actions...); err != nil {
-		return "", fmt.Errorf("failed to extract video stream: %w", err)
+		return "", nil, fmt.Errorf("failed to extract video stream: %w", err)
 	}
-
-	return streamURL, nil
+	if streamURL == "" {
+		return "", nil, fmt.Errorf("failed to extract video stream: timeout reached")
+	}
+	return streamURL, headers, nil
 }
 
-func PlayVideo(videoURL string) *exec.Cmd {
+func PlayVideo(siteName string, videoURL string, reqHeaders map[string]string) *exec.Cmd {
 	videoURL = strings.ReplaceAll(videoURL, "\\", "/")
+	mpvArgs := []string{"--hwdec=auto", "--quiet", "--ytdl-format=bestvideo+bestaudio/best", "--hls-bitrate=max"}
 
-	parsed, err := url.Parse(videoURL)
-	if err == nil {
-		switch {
-		case strings.Contains(parsed.Path, "/stream-proxy/pl"):
-			if u := parsed.Query().Get("u"); u != "" {
-				videoURL = u
-			}
-			if h := parsed.Query().Get("h"); h != "" {
-				var headers map[string]string
-				if json.Unmarshal([]byte(h), &headers) == nil {
-					var headerArgs []string
-					if ref, ok := headers["Referer"]; ok {
-						headerArgs = append(headerArgs, "Referer: "+ref)
-					}
-					if orig, ok := headers["Origin"]; ok {
-						headerArgs = append(headerArgs, "Origin: "+orig)
-					}
-					if len(headerArgs) > 0 {
-						headerArg := "--http-header-fields=" + strings.Join(headerArgs, ",")
-						return exec.Command("mpv", "--hwdec=auto", "--quiet", "--ytdl-format=bestvideo+bestaudio/best", "--hls-bitrate=max", headerArg, videoURL)
-					}
-				}
-			}
-
-		case strings.Contains(parsed.Path, "/proxy/m3u8"):
-			if u := parsed.Query().Get("url"); u != "" {
-				videoURL = u
-			}
-			var headerArgs []string
-			if ref := parsed.Query().Get("referer"); ref != "" {
-				headerArgs = append(headerArgs, "Referer: "+ref)
-			}
-			if orig := parsed.Query().Get("origin"); orig != "" {
-				headerArgs = append(headerArgs, "Origin: "+orig)
-			}
-			if len(headerArgs) > 0 {
-				headerArg := "--http-header-fields=" + strings.Join(headerArgs, ",")
-				return exec.Command("mpv", "--hwdec=auto", "--quiet", "--ytdl-format=bestvideo+bestaudio/best", "--hls-bitrate=max", headerArg, videoURL)
-			}
+	var headerParts []string
+	for k, v := range reqHeaders {
+		switch strings.ToLower(k) {
+		case "referer", "origin", "user-agent":
+			headerParts = append(headerParts, fmt.Sprintf("%s: %s", k, v))
 		}
 	}
+	if len(headerParts) > 0 {
+		mpvArgs = append(mpvArgs, "--http-header-fields="+strings.Join(headerParts, ","))
+	}
 
-	return exec.Command("mpv", "--hwdec=auto", "--quiet", "--ytdl-format=bestvideo+bestaudio/best", "--hls-bitrate=max", videoURL)
+	mpvArgs = append(mpvArgs, videoURL)
+
+	// Escape mpv arguments for the shell
+	var escapedArgs []string
+	for _, arg := range mpvArgs {
+		escapedArgs = append(escapedArgs, fmt.Sprintf("%q", arg))
+	}
+
+	script := fmt.Sprintf("echo 'Found stream on %s.' && exec mpv %s", siteName, strings.Join(escapedArgs, " "))
+	return exec.Command("sh", "-c", script)
 }

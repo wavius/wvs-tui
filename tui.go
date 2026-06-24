@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+
 	"net/http"
 	"os"
 	"path/filepath"
@@ -64,7 +65,6 @@ type tuiModel struct {
 	seasons         []scraper.SeasonResult
 	selectedEpisode scraper.EpisodeResult
 	episodes        []scraper.EpisodeResult
-	activeSite      scraper.SiteConfig
 
 	cachedImgString string
 	cachedImgName   string
@@ -75,7 +75,17 @@ type tuiModel struct {
 func (m tuiModel) loadList(items []list.Item, title string, state AppState, showDesc bool) tuiModel {
 	delegate := list.NewDefaultDelegate()
 	delegate.ShowDescription = showDesc
-	m.resultList = list.New(items, delegate, m.width/2, m.height)
+
+	w := m.width / 2
+	if w <= 0 {
+		w = 40
+	}
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+
+	m.resultList = list.New(items, delegate, w, h)
 	m.resultList.Title = title
 	m.state = state
 	return m
@@ -104,7 +114,7 @@ func initialModel(ctx context.Context, sites []scraper.SiteConfig, initialQuery 
 
 func (m tuiModel) Init() tea.Cmd {
 	if m.state == StateLoadingResults {
-		return tea.Batch(textinput.Blink, searchQueryCmd(m.ctx, m.sites, m.searchInput.Value()))
+		return tea.Batch(textinput.Blink, searchQueryCmd(m.ctx, m.searchInput.Value()))
 	}
 	return textinput.Blink
 }
@@ -119,19 +129,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.results = msg.results
-		m.activeSite = msg.activeSite
 		m = m.loadList(toListItems(msg.results), "Select Result", StateSelectResult, true)
 		m.updateImageCache()
 		return m, nil
 
 	case seasonSearchFinishedMsg:
+
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
 		}
 		if len(msg.seasons) == 0 {
 			m.state = StateLoadingVideo
-			return m, videoQueryCmd(m.ctx, m.activeSite, m.selectedResult.Name, 0, 0, true)
+			return m, videoQueryCmd(m.ctx, m.sites, m.selectedResult.TMDBID, 0, 0, true)
 		}
 		m.seasons = msg.seasons
 		m = m.loadList(toListItems(msg.seasons), "Select Season", StateSelectSeason, true)
@@ -153,7 +163,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.state = StatePlayingVideo
-		c := scraper.PlayVideo(msg.videoURL)
+		c := scraper.PlayVideo(msg.siteName, msg.videoURL, msg.headers)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return videoPlaybackFinishedMsg{err}
 		})
@@ -163,22 +173,31 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.state = StateSelectEpisode
+		if m.selectedResult.MediaType == "movie" {
+			m.state = StateSelectResult
+		} else {
+			m.state = StateSelectEpisode
+		}
+		// Force image cache update after state change
+		m.cachedImgName = ""
+		m.updateImageCache()
 		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		switch m.state {
-		case StateSelectResult, StateSelectSeason, StateSelectEpisode:
+		case StateSelectResult, StateSelectSeason, StateSelectEpisode, StatePlayingVideo:
 			m.resultList.SetSize(msg.Width/2, msg.Height)
 		}
 
 	case tea.KeyMsg:
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
 		case "enter":
+
 			return m.handleEnter()
 		case "backspace":
 			m = m.handleBackspace()
@@ -197,24 +216,28 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleEnter() (tea.Model, tea.Cmd) {
+
 	switch m.state {
 	case StateSearch:
 		if m.searchInput.Value() != "" {
 			m.state = StateLoadingResults
-			return m, searchQueryCmd(m.ctx, m.sites, m.searchInput.Value())
+			return m, searchQueryCmd(m.ctx, m.searchInput.Value())
 		}
 	case StateSelectResult:
-		if m.resultList.SelectedItem() == nil {
+		item := m.resultList.SelectedItem()
+
+		if item == nil {
 			break
 		}
-		m.selectedResult = m.resultList.SelectedItem().(scraper.SearchResult)
+		m.selectedResult = item.(scraper.SearchResult)
+
 		switch m.selectedResult.MediaType {
 		case "tv":
 			m.state = StateLoadingSeasons
 			return m, seasonQueryCmd(m.ctx, m.selectedResult.TMDBID)
 		case "movie":
 			m.state = StateLoadingVideo
-			return m, videoQueryCmd(m.ctx, m.activeSite, m.selectedResult.Name, 0, 0, true)
+			return m, videoQueryCmd(m.ctx, m.sites, m.selectedResult.TMDBID, 0, 0, true)
 		}
 	case StateSelectSeason:
 		if m.resultList.SelectedItem() == nil {
@@ -229,7 +252,7 @@ func (m tuiModel) handleEnter() (tea.Model, tea.Cmd) {
 		}
 		m.selectedEpisode = m.resultList.SelectedItem().(scraper.EpisodeResult)
 		m.state = StateLoadingVideo
-		return m, videoQueryCmd(m.ctx, m.activeSite, m.selectedResult.Name, m.selectedSeason.SeasonNumber, m.selectedEpisode.EpisodeNumber, false)
+		return m, videoQueryCmd(m.ctx, m.sites, m.selectedResult.TMDBID, m.selectedSeason.SeasonNumber, m.selectedEpisode.EpisodeNumber, false)
 	case StatePlayingVideo:
 		return m, nil
 	}
@@ -254,10 +277,16 @@ func (m tuiModel) handleBackspace() tuiModel {
 }
 
 func (m *tuiModel) updateImageCache() {
-	leftPaneWidth := m.width / 2
-	rightWidth := m.width - leftPaneWidth - 10
-	if rightWidth < 20 {
-		rightWidth = 20
+	// Set image width to remaining terminal width, and height to half terminal height
+	// Esnures description text is always visible and not pushed offscreen
+	rightWidth := m.width - (m.width / 2) - 4
+	w := rightWidth
+	h := m.height / 2
+	if h <= 0 {
+		h = 10
+	}
+	if w <= 0 {
+		w = 20
 	}
 
 	var rawImg *termimg.Image
@@ -269,7 +298,7 @@ func (m *tuiModel) updateImageCache() {
 		if item := m.resultList.SelectedItem(); item != nil {
 			res := item.(scraper.SearchResult)
 			rawImg = res.RawImg
-			cacheKey = res.Name
+			cacheKey = res.Name + res.MediaType // ensure uniqueness
 		}
 	case StateSelectSeason:
 		rawImg = m.selectedResult.RawImg
@@ -279,7 +308,13 @@ func (m *tuiModel) updateImageCache() {
 		if item := m.resultList.SelectedItem(); item != nil {
 			ep := item.(scraper.EpisodeResult)
 			rawImg = ep.RawImg
-			cacheKey = ep.Name
+			cacheKey = ep.Name + ep.AirDate
+			// Fallback to show poster if episode thumbnail is missing
+			if rawImg == nil && m.selectedResult.RawImg != nil {
+				rawImg = m.selectedResult.RawImg
+				cacheKey = m.selectedResult.Name
+				isEpisode = false // Render it as a poster
+			}
 		}
 	}
 
@@ -291,7 +326,8 @@ func (m *tuiModel) updateImageCache() {
 		return
 	}
 
-	if m.cachedImgName == cacheKey && m.cachedImgWidth == rightWidth {
+	// Skip expensive rendering if the image is already cached for this item and size
+	if m.cachedImgName == cacheKey && m.cachedImgWidth == rightWidth && m.cachedImgString != "" {
 		return
 	}
 
@@ -310,8 +346,8 @@ func (m *tuiModel) updateImageCache() {
 	availableH := float64(m.height-8) * ImageScale
 
 	// Start with available width
-	w := int(availableW)
-	h := int(float64(w) * ratio)
+	w = int(availableW)
+	h = int(float64(w) * ratio)
 
 	// If height is too big for available space, scale based on height
 	if float64(h) > availableH {
@@ -353,7 +389,7 @@ func (m tuiModel) View() string {
 	case StateLoadingSeasons:
 		return "Loading Seasons...\n"
 	case StateSelectSeason:
-		return m.renderDetailView(m.selectedResult.Desc)
+		return m.renderDetailView("▶ YOU ARE NOW SELECTING A SEASON ◀\n\n" + m.selectedResult.Desc)
 	case StateSelectEpisode:
 		desc := ""
 		if item := m.resultList.SelectedItem(); item != nil {
@@ -409,16 +445,44 @@ func (m tuiModel) renderDetailView(desc string) string {
 	return "\n" + lipgloss.JoinHorizontal(lipgloss.Top, listView, rightPane)
 }
 
-func bubbletea_main(sites []scraper.SiteConfig, initialQuery string) {
-	cwd, _ := os.Getwd()
-	uBlockPath := filepath.Join(cwd, "extensions", "uBlock0.chromium")
+func bubbletea_main(sites []scraper.SiteConfig, flags []string, initialQuery string) {
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+	// handle flags
+	for _, flag := range flags {
+		switch flag {
+		case "-h":
+			fmt.Printf("Usage: wvs [query] [flags]\n\n")
+			fmt.Printf("Commands:\n")
+			fmt.Printf("  wvs                 Launch interactive search mode\n")
+			fmt.Printf("  wvs <query>         Direct search for a specific show or movie\n\n")
+			fmt.Printf("Flags:\n")
+			fmt.Printf("  -h, -help, --help   List all commands and flags\n")
+			fmt.Printf("  -s                  List available sources and their status\n")
+			return
+		case "-s":
+			ctx := context.Background()
+			for i, s := range sites {
+				status := "DOWN"
+				if s.IsUp(ctx) {
+					status = "UP"
+				}
+				fmt.Printf("%d: [%s] %s\n", i+1, status, s.Name)
+			}
+			return
+		}
+	}
+
+	// run TUI
+	cwd, _ := os.Getwd()
+	uBlockPath := filepath.Join(cwd, "extensions", "uBOL")
+
+	opts := append(
+		chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("disable-site-isolation-trials", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-software-rasterizer", true),
-		chromedp.Flag("blink-settings", "imagesEnabled=false"),
+		chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
 		chromedp.Flag("disable-extensions-except", uBlockPath),
 		chromedp.Flag("load-extension", uBlockPath),
 	)
@@ -437,9 +501,8 @@ func bubbletea_main(sites []scraper.SiteConfig, initialQuery string) {
 // Background commands
 
 type resultSearchFinishedMsg struct {
-	results    []scraper.SearchResult
-	activeSite scraper.SiteConfig
-	err        error
+	results []scraper.SearchResult
+	err     error
 }
 
 type seasonSearchFinishedMsg struct {
@@ -453,7 +516,9 @@ type episodeSearchFinishedMsg struct {
 }
 
 type videoQueryFinishedMsg struct {
+	siteName string
 	videoURL string
+	headers  map[string]string
 	err      error
 }
 
@@ -469,20 +534,8 @@ func toListItems[T list.Item](items []T) []list.Item {
 	return result
 }
 
-func searchQueryCmd(ctx context.Context, sites []scraper.SiteConfig, query string) tea.Cmd {
+func searchQueryCmd(ctx context.Context, query string) tea.Cmd {
 	return func() tea.Msg {
-		// Find the first available site
-		var activeSite scraper.SiteConfig
-		for _, site := range sites {
-			if site.Site != "" && site.IsUp(ctx) {
-				activeSite = site
-				break
-			}
-		}
-		if activeSite.Site == "" {
-			return resultSearchFinishedMsg{err: fmt.Errorf("no streaming sites available")}
-		}
-
 		// Search TMDB
 		tmdbResults, err := scraper.SearchTMDB(ctx, query)
 		if err != nil || len(tmdbResults) == 0 {
@@ -499,7 +552,6 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SiteConfig, query strin
 				ImgURL:    r.PosterURL(),
 				TMDBID:    r.ID,
 				MediaType: r.MediaType,
-				Site:      activeSite,
 			})
 		}
 
@@ -528,7 +580,7 @@ func searchQueryCmd(ctx context.Context, sites []scraper.SiteConfig, query strin
 		}
 		wg.Wait()
 
-		return resultSearchFinishedMsg{results: results, activeSite: activeSite}
+		return resultSearchFinishedMsg{results: results}
 	}
 }
 
@@ -601,9 +653,40 @@ func episodeQueryCmd(ctx context.Context, tmdbID int, seasonNumber int) tea.Cmd 
 	}
 }
 
-func videoQueryCmd(ctx context.Context, site scraper.SiteConfig, showName string, seasonNum int, episodeNum int, isMovie bool) tea.Cmd {
+func videoQueryCmd(ctx context.Context, sites []scraper.SiteConfig, tmdbID int, seasonNum int, episodeNum int, isMovie bool) tea.Cmd {
 	return func() tea.Msg {
-		videoURL, err := site.GetVideo(ctx, showName, seasonNum, episodeNum, isMovie)
-		return videoQueryFinishedMsg{videoURL: videoURL, err: err}
+
+		// race all sites to find video
+		// use context to cancel all queries when one succeeds
+		raceCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		type result struct {
+			siteName string
+			videoURL string
+			headers  map[string]string
+			err      error
+		}
+
+		resultChannel := make(chan result, len(sites))
+
+		for _, site := range sites {
+			// query every site at the same time using goroutine
+			go func(s scraper.SiteConfig) {
+				videoURL, headers, err := s.GetVideo(raceCtx, tmdbID, seasonNum, episodeNum, isMovie)
+				resultChannel <- result{s.Name, videoURL, headers, err}
+			}(site)
+		}
+
+		var lastErr error
+		for range sites {
+			res := <-resultChannel
+			if res.err == nil && res.videoURL != "" {
+				return videoQueryFinishedMsg{siteName: res.siteName, videoURL: res.videoURL, headers: res.headers, err: nil}
+			}
+			lastErr = res.err
+		}
+
+		return videoQueryFinishedMsg{err: fmt.Errorf("all sites failed to find video: %v", lastErr)}
 	}
 }
