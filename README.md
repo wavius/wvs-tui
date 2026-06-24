@@ -42,21 +42,21 @@ wvs <query> [flags]
 ```
 
 ### Commands
-<table width="60%">
+<table width="100%">
   <tr><th align="left" width="30%">Command</th><th align="left" width="70%">Action</th></tr>
   <tr><td><code>wvs</code></td><td>Launch interactive search mode</td></tr>
   <tr><td><code>wvs &lt;query&gt;</code></td><td>Direct search for a specific show or movie</td></tr>
 </table>
 
 ### Flags
-<table width="60%">
+<table width="100%">
   <tr><th align="left" width="30%">Flag</th><th align="left" width="70%">Action</th></tr>
   <tr><td><code>-h</code>, <code>-help</code>, <code>--help</code></td><td>List all commands and flags</td></tr>
   <tr><td><code>-s</code></td><td>List available sources and their status</td></tr>
 </table>
 
 ### Controls
-<table width="60%">
+<table width="100%">
   <tr><th align="left" width="30%">Key</th><th align="left" width="70%">Action</th></tr>
   <tr><td><code>Enter</code></td><td>Confirm</td></tr>
   <tr><td><code>Backspace</code></td><td>Go back to previous screen</td></tr>
