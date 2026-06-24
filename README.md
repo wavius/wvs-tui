@@ -42,29 +42,26 @@ wvs <query> [flags]
 ```
 
 ### Commands
-<table width="100%">
-  <tr><th align="left" width="30%">Command</th><th align="left" width="70%">Action</th></tr>
-  <tr><td><code>wvs</code></td><td>Launch interactive search mode</td></tr>
-  <tr><td><code>wvs &lt;query&gt;</code></td><td>Direct search for a specific show or movie</td></tr>
-</table>
+| Command       | Action                                     |
+| ------------- | ------------------------------------------ |
+| `wvs`         | Launch interactive search mode             |
+| `wvs <query>` | Direct search for a specific show or movie |
 
 ### Flags
-<table width="100%">
-  <tr><th align="left" width="30%">Flag</th><th align="left" width="70%">Action</th></tr>
-  <tr><td><code>-h</code>, <code>-help</code>, <code>--help</code></td><td>List all commands and flags</td></tr>
-  <tr><td><code>-s</code></td><td>List available sources and their status</td></tr>
-</table>
+| Flag                      | Action                                  |
+| ------------------------- | --------------------------------------- |
+| `-h`, `-help`, `--help`   | List all commands and flags             |
+| `-s`                      | List available sources and their status |
 
 ### Controls
-<table width="100%">
-  <tr><th align="left" width="30%">Key</th><th align="left" width="70%">Action</th></tr>
-  <tr><td><code>Enter</code></td><td>Confirm</td></tr>
-  <tr><td><code>Backspace</code></td><td>Go back to previous screen</td></tr>
-  <tr><td><code>j</code> / <code>&darr;</code></td><td>Navigate down</td></tr>
-  <tr><td><code>k</code> / <code>&uarr;</code></td><td>Navigate up</td></tr>
-  <tr><td><code>/</code></td><td>Filter lists</td></tr>
-  <tr><td><code>q</code> / <code>Esc</code> / <code>Ctrl+C</code></td><td>Quit</td></tr>
-</table>
+| Key                      | Action                         |
+| ------------------------ | ------------------------------ |
+| `Enter`                  | Confirm                        |
+| `Backspace`              | Go back to previous screen     |
+| `j` / `↓`                | Navigate down                  |
+| `k` / `↑`                | Navigate up                    |
+| `/`                      | Filter lists                   |
+| `q` / `Esc` / `Ctrl+C`   | Quit                           |
 
 ## Notes
 - Posters are rendered using Halfblocks 
