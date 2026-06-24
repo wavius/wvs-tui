@@ -38,7 +38,9 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
 3. **Usage:**
    ```bash
    wvs                  # Interactive mode
-                        # or
+   ```
+   or
+   ```bash
    wvs Attack on Titan  # Direct search
    ```
 - **Enter** to confirm
