@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -51,6 +52,7 @@ const (
 type tuiModel struct {
 	ctx   context.Context
 	sites []scraper.SiteConfig
+	flags map[string]string
 	state AppState
 	err   error
 
@@ -91,7 +93,7 @@ func (m tuiModel) loadList(items []list.Item, title string, state AppState, show
 	return m
 }
 
-func initialModel(ctx context.Context, sites []scraper.SiteConfig, initialQuery string) tuiModel {
+func initialModel(ctx context.Context, sites []scraper.SiteConfig, flags map[string]string, initialQuery string) tuiModel {
 	ti := textinput.New()
 	ti.Placeholder = "..."
 	ti.Focus()
@@ -109,6 +111,7 @@ func initialModel(ctx context.Context, sites []scraper.SiteConfig, initialQuery 
 		searchInput: ti,
 		ctx:         ctx,
 		sites:       sites,
+		flags:       flags,
 	}
 }
 
@@ -163,7 +166,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.state = StatePlayingVideo
-		c := scraper.PlayVideo(msg.siteName, msg.videoURL, msg.headers)
+		c := scraper.PlayVideo(msg.siteName, msg.videoURL, msg.subtitles, msg.headers, m.flags["q"])
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return videoPlaybackFinishedMsg{err}
 		})
@@ -445,30 +448,60 @@ func (m tuiModel) renderDetailView(desc string) string {
 	return "\n" + lipgloss.JoinHorizontal(lipgloss.Top, listView, rightPane)
 }
 
-func bubbletea_main(sites []scraper.SiteConfig, flags []string, initialQuery string) {
+func bubbletea_main(sites []scraper.SiteConfig, flags map[string]string, initialQuery string) {
 
-	// handle flags
-	for _, flag := range flags {
-		switch flag {
-		case "-h":
-			fmt.Printf("Usage: wvs [query] [flags]\n\n")
-			fmt.Printf("Commands:\n")
-			fmt.Printf("  wvs                 Launch interactive search mode\n")
-			fmt.Printf("  wvs <query>         Direct search for a specific show or movie\n\n")
-			fmt.Printf("Flags:\n")
-			fmt.Printf("  -h, -help, --help   List all commands and flags\n")
-			fmt.Printf("  -s                  List available sources and their status\n")
-			return
-		case "-s":
-			ctx := context.Background()
-			for i, s := range sites {
-				status := "DOWN"
-				if s.IsUp(ctx) {
-					status = "UP"
-				}
-				fmt.Printf("%d: [%s] %s\n", i+1, status, s.Name)
+	headless := true
+	if flags["h"] != "" {
+		fmt.Printf("Usage: wvs [query] [flags]\n\n")
+		fmt.Printf("Commands:\n")
+		fmt.Printf("  wvs              Launch interactive search mode\n")
+		fmt.Printf("  wvs <query>      Direct search for a specific show or movie\n\n")
+		fmt.Printf("Flags:\n")
+		fmt.Printf("  -h, -help        List all commands and flags\n")
+		fmt.Printf("  -l, -list        List available sources and their status\n")
+		fmt.Printf("  -d, -debug       Disable headless browser mode\n")
+		fmt.Printf("  -s, -source      Select a specific source by number or name (default is fastest source)\n")
+		fmt.Printf("  -q, -quality     Set video quality (default is 1080p)\n")
+		return
+	}
+
+	if flags["l"] != "" {
+		ctx := context.Background()
+		for i, s := range sites {
+			status := "DOWN"
+			if s.IsUp(ctx) {
+				status = "UP"
 			}
-			return
+			fmt.Printf("%d: [%s] %s\n", i+1, status, s.Name)
+		}
+		return
+	}
+
+	if flags["d"] != "" {
+		headless = false
+	}
+
+	if source, ok := flags["s"]; ok {
+		if num, err := strconv.Atoi(source); err == nil {
+			if num > 0 && num <= len(sites) {
+				sites = []scraper.SiteConfig{sites[num-1]}
+			} else {
+				fmt.Printf("Invalid source number: %d\n", num)
+				return
+			}
+		} else {
+			found := false
+			for _, s := range sites {
+				if s.Name == source {
+					sites = []scraper.SiteConfig{s}
+					found = true
+					break
+				}
+			}
+			if !found {
+				fmt.Printf("Invalid source name: %s\n", source)
+				return
+			}
 		}
 	}
 
@@ -478,6 +511,7 @@ func bubbletea_main(sites []scraper.SiteConfig, flags []string, initialQuery str
 
 	opts := append(
 		chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", headless),
 		chromedp.Flag("disable-site-isolation-trials", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
@@ -492,7 +526,7 @@ func bubbletea_main(sites []scraper.SiteConfig, flags []string, initialQuery str
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	p := tea.NewProgram(initialModel(ctx, sites, initialQuery), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(ctx, sites, flags, initialQuery), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)
 	}
@@ -516,10 +550,11 @@ type episodeSearchFinishedMsg struct {
 }
 
 type videoQueryFinishedMsg struct {
-	siteName string
-	videoURL string
-	headers  map[string]string
-	err      error
+	siteName  string
+	videoURL  string
+	subtitles []string
+	headers   map[string]string
+	err       error
 }
 
 type videoPlaybackFinishedMsg struct {
@@ -662,10 +697,11 @@ func videoQueryCmd(ctx context.Context, sites []scraper.SiteConfig, tmdbID int, 
 		defer cancel()
 
 		type result struct {
-			siteName string
-			videoURL string
-			headers  map[string]string
-			err      error
+			siteName  string
+			videoURL  string
+			subtitles []string
+			headers   map[string]string
+			err       error
 		}
 
 		resultChannel := make(chan result, len(sites))
@@ -673,8 +709,8 @@ func videoQueryCmd(ctx context.Context, sites []scraper.SiteConfig, tmdbID int, 
 		for _, site := range sites {
 			// query every site at the same time using goroutine
 			go func(s scraper.SiteConfig) {
-				videoURL, headers, err := s.GetVideo(raceCtx, tmdbID, seasonNum, episodeNum, isMovie)
-				resultChannel <- result{s.Name, videoURL, headers, err}
+				videoURL, subtitles, headers, err := s.GetVideo(raceCtx, tmdbID, seasonNum, episodeNum, isMovie)
+				resultChannel <- result{s.Name, videoURL, subtitles, headers, err}
 			}(site)
 		}
 
@@ -682,7 +718,7 @@ func videoQueryCmd(ctx context.Context, sites []scraper.SiteConfig, tmdbID int, 
 		for range sites {
 			res := <-resultChannel
 			if res.err == nil && res.videoURL != "" {
-				return videoQueryFinishedMsg{siteName: res.siteName, videoURL: res.videoURL, headers: res.headers, err: nil}
+				return videoQueryFinishedMsg{siteName: res.siteName, videoURL: res.videoURL, subtitles: res.subtitles, headers: res.headers, err: nil}
 			}
 			lastErr = res.err
 		}

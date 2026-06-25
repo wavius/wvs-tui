@@ -27,7 +27,17 @@ var gaiaflix = scraper.SiteConfig{
 	PlayButtonSelector: "button.absolute.top-1\\/2",
 }
 
-var Sites = []scraper.SiteConfig{flickystream, gaiaflix}
+var streamgoblin = scraper.SiteConfig{
+	Name:               "streamgoblin",
+	Site:               "https://streamgoblin.com",
+	Type:               scraper.All,
+	MovieURLTemplate:   "%s/player/movie/%d",
+	TVURLTemplate:      "%s/player/tv/%d/season/%d/episode/%d",
+	VideoReadySelector: "iframe",
+	PlayButtonSelector: "",
+}
+
+var Sites = []scraper.SiteConfig{streamgoblin, gaiaflix, flickystream}
 
 func main() {
 	// disable termimg's CSI queries to prevent it from reading os.Stdin
@@ -35,20 +45,30 @@ func main() {
 	os.Setenv("TERMIMG_BYPASS_DETECTION", "halfblocks")
 
 	var queryParts []string
-	var flags []string
+	flags := make(map[string]string)
 
 	if len(os.Args) > 1 {
-		supportedFlags := map[string]string{
-			"-h":     "-h",
-			"--help": "-h",
-			"-help":  "-h",
-			"-s":     "-s",
-		}
-
-		for _, arg := range os.Args[1:] {
-			if mappedFlag, exists := supportedFlags[arg]; exists {
-				flags = append(flags, mappedFlag)
-			} else {
+		args := os.Args[1:]
+		for i := 0; i < len(args); i++ {
+			arg := args[i]
+			switch arg {
+			case "-h", "-help":
+				flags["h"] = "true"
+			case "-l", "-list":
+				flags["l"] = "true"
+			case "-d", "-debug":
+				flags["d"] = "true"
+			case "-s", "-source":
+				if i+1 < len(args) {
+					flags["s"] = args[i+1]
+					i++
+				}
+			case "-q", "-quality":
+				if i+1 < len(args) {
+					flags["q"] = args[i+1]
+					i++
+				}
+			default:
 				queryParts = append(queryParts, arg)
 			}
 		}

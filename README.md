@@ -49,8 +49,11 @@ wvs <query> # Direct search for a specific show or movie
 
 ### Flags
 ```bash
-wvs -h      # List all commands and flags
-wvs -s      # List available sources and their status
+wvs -h, -help    # List all commands and flags
+wvs -l, -list    # List available sources and their status
+wvs -d, -debug   # Disable headless browser mode
+wvs -s <source>  # Select a specific source by number or name (default is fastest source)
+wvs -q <quality> # Set video quality (default is 1080p)
 ```
 
 ### Controls
@@ -62,11 +65,3 @@ wvs -s      # List available sources and their status
 | `k` / `↑`                | Navigate up                    |
 | `/`                      | Filter lists                   |
 | `q` / `Esc` / `Ctrl+C`   | Quit                           |
-
-## Notes
-- Posters are rendered using Halfblocks 
-
-## TODO
-- Sync watch history with Anilist/TMDB
-- Video downloads
-- Flags: Language (default En), Quality, Sub/Dub (default Sub), Select preferred source

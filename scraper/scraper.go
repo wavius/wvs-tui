@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blacktop/go-termimg"
@@ -96,16 +98,37 @@ func (s SiteConfig) IsUp(ctx context.Context) bool {
 	return resp.StatusCode < 500
 }
 
-func (s SiteConfig) GetVideo(ctx context.Context, tmdbID, seasonNum, episodeNum int, isMovie bool) (string, map[string]string, error) {
+func (s SiteConfig) GetVideo(ctx context.Context, tmdbID, seasonNum, episodeNum int, isMovie bool) (string, []string, map[string]string, error) {
 	var streamURL string
+	var subtitles []string
+	var subtitlesMu sync.Mutex
 	headers := make(map[string]string)
 
 	tabCtx, cancelTab := chromedp.NewContext(ctx)
 	defer cancelTab()
 
+	vttRegex := regexp.MustCompile(`https?://[^\s"'<>]+\.(?:vtt|srt)`)
+
 	chromedp.ListenTarget(tabCtx, func(ev any) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			u := e.Request.URL
+
+			// Capture subtitle files
+			if strings.Contains(u, ".vtt") || strings.Contains(u, ".srt") {
+				subtitlesMu.Lock()
+				found := false
+				for _, sub := range subtitles {
+					if sub == u {
+						found = true
+						break
+					}
+				}
+				if !found {
+					subtitles = append(subtitles, u)
+				}
+				subtitlesMu.Unlock()
+			}
+
 			if streamURL == "" && (strings.Contains(u, ".m3u8") || strings.Contains(u, ".mp4")) {
 				streamURL = u
 				for k, v := range e.Request.Headers {
@@ -116,6 +139,42 @@ func (s SiteConfig) GetVideo(ctx context.Context, tmdbID, seasonNum, episodeNum 
 				if headers["Referer"] == "" && headers["referer"] == "" {
 					headers["Referer"] = e.DocumentURL
 				}
+			}
+		} else if e, ok := ev.(*network.EventResponseReceived); ok {
+			if strings.Contains(e.Response.MimeType, "application/json") {
+				reqID := e.RequestID
+				go func() {
+					var body []byte
+					err := chromedp.Run(tabCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+						b, err := network.GetResponseBody(reqID).Do(ctx)
+						if err != nil {
+							return err
+						}
+						body = b
+						return nil
+					}))
+
+					if err == nil && len(body) > 0 {
+						matches := vttRegex.FindAllString(string(body), -1)
+						if len(matches) > 0 {
+							subtitlesMu.Lock()
+							for _, match := range matches {
+								cleanMatch := strings.ReplaceAll(match, "\\/", "/")
+								found := false
+								for _, sub := range subtitles {
+									if sub == cleanMatch {
+										found = true
+										break
+									}
+								}
+								if !found {
+									subtitles = append(subtitles, cleanMatch)
+								}
+							}
+							subtitlesMu.Unlock()
+						}
+					}
+				}()
 			}
 		}
 	})
@@ -165,11 +224,11 @@ func (s SiteConfig) GetVideo(ctx context.Context, tmdbID, seasonNum, episodeNum 
 	}
 
 	actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
-		for range 30 {
+		for range 30 { // 30 seconds
 			if streamURL != "" {
 				return nil
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1 * time.Second)
 		}
 		return nil
 	}))
@@ -178,17 +237,28 @@ func (s SiteConfig) GetVideo(ctx context.Context, tmdbID, seasonNum, episodeNum 
 	defer cancel()
 
 	if err := chromedp.Run(timeoutCtx, actions...); err != nil {
-		return "", nil, fmt.Errorf("failed to extract video stream: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to extract video stream: %w", err)
 	}
 	if streamURL == "" {
-		return "", nil, fmt.Errorf("failed to extract video stream: timeout reached")
+		return "", nil, nil, fmt.Errorf("failed to extract video stream: timeout reached")
 	}
-	return streamURL, headers, nil
+	return streamURL, subtitles, headers, nil
 }
 
-func PlayVideo(siteName string, videoURL string, reqHeaders map[string]string) *exec.Cmd {
+func PlayVideo(siteName string, videoURL string, subtitles []string, reqHeaders map[string]string, quality string) *exec.Cmd {
 	videoURL = strings.ReplaceAll(videoURL, "\\", "/")
-	mpvArgs := []string{"--hwdec=auto", "--quiet", "--ytdl-format=bestvideo+bestaudio/best", "--hls-bitrate=max"}
+	
+	ytdlFormat := "bestvideo+bestaudio/best"
+	if quality != "" {
+		qualityNum := strings.TrimSuffix(quality, "p")
+		ytdlFormat = fmt.Sprintf("bestvideo[height<=?%s]+bestaudio/best[height<=?%s]", qualityNum, qualityNum)
+	}
+	
+	mpvArgs := []string{"--hwdec=auto", "--quiet", "--ytdl-format=" + ytdlFormat, "--hls-bitrate=max", "--ytdl-raw-options=sub-langs=all,write-subs="}
+
+	for _, sub := range subtitles {
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--sub-file=%s", sub))
+	}
 
 	var headerParts []string
 	for k, v := range reqHeaders {
