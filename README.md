@@ -49,11 +49,11 @@ wvs <query> # Direct search for a specific show or movie
 
 ### Flags
 ```bash
-wvs -h, -help    # List all commands and flags
-wvs -l, -list    # List available sources and their status
-wvs -d, -debug   # Disable headless browser mode
-wvs -s <source>  # Select a specific source by number or name (default is fastest source)
-wvs -q <quality> # Set video quality (default is 1080p)
+wvs -h, -help             # List all commands and flags
+wvs -l, -list             # List available sources and their status
+wvs -d, -debug            # Disable headless browser mode
+wvs -s, -source <int|str> # Select a specific source by number or name (default is fastest source)
+wvs -q, -quality <str>    # Set video quality (default is 1080p)
 ```
 
 ### Controls
