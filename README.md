@@ -18,21 +18,26 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
 ## Quick Start
 
 1. **Clone & Setup:**
+
    ```bash
    git clone https://github.com/wavius/wvs-tui.git && cd wvs-tui
    ```
 
 2. **Install (Linux/macOS):**
+
    ```bash
    echo "API_KEY=your_tmdb_key_here" > .env
    make install
    ```
+
    *(Ensure `~/.local/bin` is in your PATH)*
 
    **Install (Windows):**
+
    ```powershell
    go build -ldflags="-X 'main/scraper.TMDBApiKey=YOUR_API_KEY'" -o wvs.exe
    ```
+
    *(Move the generated `wvs.exe` to a folder in your System PATH)*
 
 ## Usage
@@ -42,21 +47,24 @@ wvs [query] [flags]
 ```
 
 ### Commands
+
 ```bash
 wvs         # Launch interactive search mode
 wvs <query> # Direct search for a specific show or movie
 ```
 
 ### Flags
+
 ```bash
 wvs -h, -help             # List all commands and flags
 wvs -l, -list             # List available sources and their status
 wvs -d, -debug            # Disable headless browser mode
-wvs -s, -source <int|str> # Select a specific source by number or name (default is fastest source)
-wvs -q, -quality <str>    # Set video quality (default is 1080p)
+wvs -s, -source <int|str> # Select a specific source by number or name (default: fastest source)
+wvs -q, -quality <str>    # Set video quality (default: 1080p)
 ```
 
 ### Controls
+
 | Key                      | Action                         |
 | ------------------------ | ------------------------------ |
 | `Enter`                  | Confirm                        |
