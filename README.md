@@ -12,6 +12,7 @@ Watch anime, TV shows, and movies from your terminal. Uses&nbsp;&nbsp;<a href="h
 
 - [Go](https://go.dev/) (1.21+)
 - [mpv](https://mpv.io/) (for video playback)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (required by mpv for stream processing)
 - Google Chrome or Chromium (for headless scraping)
 - Free [TMDB API Key](https://www.themoviedb.org/documentation/api)
 

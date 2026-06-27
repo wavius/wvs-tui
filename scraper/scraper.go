@@ -242,33 +242,46 @@ func (s SiteConfig) GetVideo(ctx context.Context, tmdbID, seasonNum, episodeNum 
 	if streamURL == "" {
 		return "", nil, nil, fmt.Errorf("failed to extract video stream: timeout reached")
 	}
+
 	return streamURL, subtitles, headers, nil
 }
 
 func PlayVideo(siteName string, videoURL string, subtitles []string, reqHeaders map[string]string, quality string) *exec.Cmd {
 	videoURL = strings.ReplaceAll(videoURL, "\\", "/")
-	
+
 	ytdlFormat := "bestvideo+bestaudio/best"
 	if quality != "" {
 		qualityNum := strings.TrimSuffix(quality, "p")
 		ytdlFormat = fmt.Sprintf("bestvideo[height<=?%s]+bestaudio/best[height<=?%s]", qualityNum, qualityNum)
 	}
-	
-	mpvArgs := []string{"--hwdec=auto", "--quiet", "--ytdl-format=" + ytdlFormat, "--hls-bitrate=max", "--ytdl-raw-options=sub-langs=all,write-subs="}
+
+	mpvArgs := []string{"--hwdec=auto", "--quiet", "--script-opts=ytdl_hook-ytdl_path=yt-dlp", "--ytdl-format=" + ytdlFormat, "--hls-bitrate=max"}
 
 	for _, sub := range subtitles {
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--sub-file=%s", sub))
 	}
 
-	var headerParts []string
+	hasUserAgent := false
 	for k, v := range reqHeaders {
-		switch strings.ToLower(k) {
-		case "referer", "origin", "user-agent":
-			headerParts = append(headerParts, fmt.Sprintf("%s: %s", k, v))
+		lowerK := strings.ToLower(k)
+		switch lowerK {
+		case "referer":
+			mpvArgs = append(mpvArgs, fmt.Sprintf("--referrer=%s", v))
+			mpvArgs = append(mpvArgs, fmt.Sprintf("--ytdl-raw-options-append=referer=%s", v))
+		case "user-agent":
+			hasUserAgent = true
+			v = strings.ReplaceAll(v, "HeadlessChrome", "Chrome")
+			mpvArgs = append(mpvArgs, fmt.Sprintf("--user-agent=%s", v))
+			mpvArgs = append(mpvArgs, fmt.Sprintf("--ytdl-raw-options-append=user-agent=%s", v))
+		case "origin":
+			mpvArgs = append(mpvArgs, fmt.Sprintf("--http-header-fields-append=Origin: %s", v))
 		}
 	}
-	if len(headerParts) > 0 {
-		mpvArgs = append(mpvArgs, "--http-header-fields="+strings.Join(headerParts, ","))
+
+	if !hasUserAgent {
+		ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--user-agent=%s", ua))
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--ytdl-raw-options-append=user-agent=%s", ua))
 	}
 
 	mpvArgs = append(mpvArgs, fmt.Sprintf("--term-playing-msg=Found stream on %s.", siteName))

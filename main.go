@@ -75,5 +75,5 @@ func main() {
 	}
 
 	query := strings.Join(queryParts, " ")
-	bubbletea_main(Sites, flags, query)
+	bubbleteaMain(Sites, flags, query)
 }

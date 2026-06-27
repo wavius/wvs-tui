@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-
 	"net/http"
 	"os"
 	"path/filepath"
@@ -168,12 +167,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StatePlayingVideo
 		c := scraper.PlayVideo(msg.siteName, msg.videoURL, msg.subtitles, msg.headers, m.flags["q"])
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
-			return videoPlaybackFinishedMsg{err}
+			return videoPlaybackFinishedMsg{err: err, siteName: msg.siteName}
 		})
 
 	case videoPlaybackFinishedMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.err = fmt.Errorf("playback failed on source '%s': %v\n\nThe proxy might be blocking mpv. Try selecting a different source using the '-s' flag (wvs <query> -s <index|name>)", msg.siteName, msg.err)
 			return m, nil
 		}
 		if m.selectedResult.MediaType == "movie" {
@@ -219,7 +218,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleEnter() (tea.Model, tea.Cmd) {
-
 	switch m.state {
 	case StateSearch:
 		if m.searchInput.Value() != "" {
@@ -448,8 +446,7 @@ func (m tuiModel) renderDetailView(desc string) string {
 	return "\n" + lipgloss.JoinHorizontal(lipgloss.Top, listView, rightPane)
 }
 
-func bubbletea_main(sites []scraper.SiteConfig, flags map[string]string, initialQuery string) {
-
+func bubbleteaMain(sites []scraper.SiteConfig, flags map[string]string, initialQuery string) {
 	headless := true
 	if flags["h"] != "" {
 		fmt.Printf("Usage: wvs [query] [flags]\n\n")
@@ -558,7 +555,8 @@ type videoQueryFinishedMsg struct {
 }
 
 type videoPlaybackFinishedMsg struct {
-	err error
+	err      error
+	siteName string
 }
 
 func toListItems[T list.Item](items []T) []list.Item {
@@ -690,7 +688,6 @@ func episodeQueryCmd(ctx context.Context, tmdbID int, seasonNumber int) tea.Cmd 
 
 func videoQueryCmd(ctx context.Context, sites []scraper.SiteConfig, tmdbID int, seasonNum int, episodeNum int, isMovie bool) tea.Cmd {
 	return func() tea.Msg {
-
 		// race all sites to find video
 		// use context to cancel all queries when one succeeds
 		raceCtx, cancel := context.WithCancel(ctx)
@@ -723,6 +720,6 @@ func videoQueryCmd(ctx context.Context, sites []scraper.SiteConfig, tmdbID int, 
 			lastErr = res.err
 		}
 
-		return videoQueryFinishedMsg{err: fmt.Errorf("all sites failed to find video: %v", lastErr)}
+		return videoQueryFinishedMsg{err: fmt.Errorf("failed to find video: %v", lastErr)}
 	}
 }
