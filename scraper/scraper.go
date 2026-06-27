@@ -271,14 +271,8 @@ func PlayVideo(siteName string, videoURL string, subtitles []string, reqHeaders 
 		mpvArgs = append(mpvArgs, "--http-header-fields="+strings.Join(headerParts, ","))
 	}
 
+	mpvArgs = append(mpvArgs, fmt.Sprintf("--term-playing-msg=Found stream on %s.", siteName))
 	mpvArgs = append(mpvArgs, videoURL)
 
-	// Escape mpv arguments for the shell
-	var escapedArgs []string
-	for _, arg := range mpvArgs {
-		escapedArgs = append(escapedArgs, fmt.Sprintf("%q", arg))
-	}
-
-	script := fmt.Sprintf("echo 'Found stream on %s.' && exec mpv %s", siteName, strings.Join(escapedArgs, " "))
-	return exec.Command("sh", "-c", script)
+	return exec.Command("mpv", mpvArgs...)
 }
