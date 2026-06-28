@@ -17,16 +17,6 @@ var flickystream = scraper.SiteConfig{
 	PlayButtonSelector: "button[aria-label='Play']",
 }
 
-var gaiaflix = scraper.SiteConfig{
-	Name:               "gaiaflix",
-	Site:               "https://gaiaflix.live",
-	Type:               scraper.All,
-	MovieURLTemplate:   "%s/watch/%d?type=movie",
-	TVURLTemplate:      "%s/watch/%d?type=tv&s=%d&e=%d",
-	VideoReadySelector: "iframe",
-	PlayButtonSelector: "button.absolute.top-1\\/2",
-}
-
 var streamgoblin = scraper.SiteConfig{
 	Name:               "streamgoblin",
 	Site:               "https://streamgoblin.com",
@@ -37,7 +27,7 @@ var streamgoblin = scraper.SiteConfig{
 	PlayButtonSelector: "",
 }
 
-var Sites = []scraper.SiteConfig{streamgoblin, gaiaflix, flickystream}
+var Sites = []scraper.SiteConfig{streamgoblin, flickystream}
 
 func main() {
 	// disable termimg's CSI queries to prevent it from reading os.Stdin
